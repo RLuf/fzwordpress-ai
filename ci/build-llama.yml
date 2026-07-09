@@ -1,0 +1,219 @@
+# Compila o `llama-cli` (llama.cpp) e publica os pacotes numa GitHub Release.
+#
+# Gatilhos:
+#   - push de tag  v*   (ex.: v1.0)  -> compila E publica a Release.
+#   - workflow_dispatch             -> compila e guarda os artefatos do run
+#                                       (sem publicar Release).
+#
+# Os binários Linux são compilados dentro do container manylinux_2_28
+# (glibc 2.28) para rodarem em RHEL/CloudLinux 8+ e qualquer distro mais nova.
+name: build-llama
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      llama_ref:
+        description: 'Tag/branch do llama.cpp (ggml-org/llama.cpp) a compilar'
+        required: false
+        default: 'b4589'
+      plugin_tag:
+        description: 'Rótulo do pacote no nome do tarball (ignorado em push de tag)'
+        required: false
+        default: 'dev'
+
+# Necessário para o job de release criar/atualizar a Release e anexar assets.
+permissions:
+  contents: write
+
+env:
+  LLAMA_CPP_REPO: https://github.com/ggml-org/llama.cpp.git
+  # Ref fixada do llama.cpp. Sobreponha via "Run workflow" (workflow_dispatch).
+  LLAMA_CPP_REF: ${{ github.event.inputs.llama_ref || 'b4589' }}
+
+jobs:
+  # ------------------------------------------------------------ Linux x86_64
+  build-linux:
+    name: linux-x86_64 (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    container: quay.io/pypa/manylinux_2_28_x86_64
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [portable, avx2]
+    steps:
+      - name: Metadados (tag do pacote)
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.event.inputs.plugin_tag || 'dev' }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Toolchain (gcc-toolset + cmake)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          # manylinux traz cmake/git; ativa o gcc-toolset mais novo instalado.
+          for e in /opt/rh/gcc-toolset-*/enable; do [ -f "$e" ] && source "$e" || true; done
+          command -v cmake >/dev/null 2>&1 || yum install -y cmake
+          cmake --version
+          { cc --version || gcc --version; } 2>/dev/null | head -n1
+
+      - name: Checkout llama.cpp @ ${{ env.LLAMA_CPP_REF }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 --branch "${LLAMA_CPP_REF}" "${LLAMA_CPP_REPO}" llama.cpp
+
+      - name: Configure & build (llama-cli)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for e in /opt/rh/gcc-toolset-*/enable; do [ -f "$e" ] && source "$e" || true; done
+          case "${{ matrix.variant }}" in
+            portable) EXTRA=( -DGGML_NATIVE=OFF ) ;;
+            avx2)     EXTRA=( -DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON ) ;;
+            *)        echo "variante desconhecida"; exit 1 ;;
+          esac
+          cmake -S llama.cpp -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLAMA_CURL=OFF \
+            -DBUILD_SHARED_LIBS=OFF \
+            "${EXTRA[@]}"
+          cmake --build build --config Release -j "$(nproc)" --target llama-cli
+
+      - name: Empacota + sha256
+        id: pkg
+        shell: bash
+        run: |
+          set -euxo pipefail
+          BIN=""
+          for c in build/bin/llama-cli build/llama-cli; do [ -x "$c" ] && BIN="$c" && break; done
+          test -n "$BIN"
+          "$BIN" --version 2>&1 | head -n1 || true
+
+          STAGE="stage"; rm -rf "$STAGE"; mkdir -p "$STAGE/lib"
+          cp -v "$BIN" "$STAGE/llama-cli"
+          # Copia SÓ libs não-sistema de que o binário porventura dependa.
+          ldd "$BIN" 2>/dev/null | awk '/=>/ {print $3}' | while read -r so; do
+            case "$so" in
+              ""|/lib/*|/lib64/*|/usr/lib/*|/usr/lib64/*) : ;;
+              *) cp -v "$so" "$STAGE/lib/" || true ;;
+            esac
+          done
+          rmdir "$STAGE/lib" 2>/dev/null || true
+
+          VARIANT="${{ matrix.variant }}"
+          TAG="${{ steps.meta.outputs.tag }}"
+          BASE="llama-cli-linux-x86_64"
+          [ "$VARIANT" = "portable" ] || BASE="${BASE}-${VARIANT}"
+          NAME="${BASE}-${TAG}.tar.gz"
+
+          tar -C "$STAGE" -czf "$NAME" .
+          sha256sum "$NAME" | tee "${NAME}.sha256"
+          mkdir -p dist && mv "$NAME" "${NAME}.sha256" dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64-${{ matrix.variant }}
+          path: dist/*
+          if-no-files-found: error
+
+  # -------------------------------------------------------------- macOS arm64
+  build-macos:
+    name: macos-arm64 (portable)
+    runs-on: macos-latest
+    steps:
+      - name: Metadados (tag do pacote)
+        id: meta
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.event.inputs.plugin_tag || 'dev' }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Toolchain (cmake)
+        run: |
+          set -euxo pipefail
+          command -v cmake >/dev/null 2>&1 || brew install cmake
+          cmake --version
+
+      - name: Checkout llama.cpp @ ${{ env.LLAMA_CPP_REF }}
+        run: git clone --depth 1 --branch "${LLAMA_CPP_REF}" "${LLAMA_CPP_REPO}" llama.cpp
+
+      - name: Configure & build (llama-cli)
+        run: |
+          set -euxo pipefail
+          cmake -S llama.cpp -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLAMA_CURL=OFF \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DGGML_NATIVE=OFF \
+            -DGGML_METAL=OFF
+          cmake --build build --config Release -j "$(sysctl -n hw.ncpu)" --target llama-cli
+
+      - name: Empacota + sha256
+        run: |
+          set -euxo pipefail
+          BIN=""
+          for c in build/bin/llama-cli build/llama-cli; do [ -x "$c" ] && BIN="$c" && break; done
+          test -n "$BIN"
+          STAGE="stage"; rm -rf "$STAGE"; mkdir -p "$STAGE"
+          cp -v "$BIN" "$STAGE/llama-cli"
+          TAG="${{ steps.meta.outputs.tag }}"
+          NAME="llama-cli-macos-arm64-${TAG}.tar.gz"
+          tar -C "$STAGE" -czf "$NAME" .
+          shasum -a 256 "$NAME" | tee "${NAME}.sha256"
+          mkdir -p dist && mv "$NAME" "${NAME}.sha256" dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-portable
+          path: dist/*
+          if-no-files-found: error
+
+  # ------------------------------------------------------------- publica Release
+  release:
+    name: Publica Release
+    needs: [build-linux, build-macos]
+    # Roda em push de tag mesmo que o job macOS falhe, desde que o Linux tenha ido.
+    if: ${{ always() && github.ref_type == 'tag' && needs.build-linux.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixa artefatos
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Reúne assets + SHA256SUMS
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p release
+          find artifacts -type f -name '*.tar.gz'  -exec cp -v {} release/ \;
+          find artifacts -type f -name '*.sha256'  -exec cp -v {} release/ \; || true
+          ( cd release && sha256sum ./*.tar.gz > SHA256SUMS && cat SHA256SUMS )
+
+      - name: Cria/atualiza a Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            release/*.tar.gz
+            release/*.sha256
+            release/SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

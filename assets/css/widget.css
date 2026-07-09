@@ -1,0 +1,512 @@
+/**
+ * FZ WordPress AI — estilos do widget de chat.
+ *
+ * Tudo escopado sob .fzwai-widget para não colidir com o tema do site.
+ * Sem fontes/recursos externos. O acento vem da variável --fzwai-accent
+ * (definida inline pelo PHP e reforçada pelo JS). Amigável a claro e escuro.
+ */
+
+/* ------------------------------------------------------------------ *
+ *  Reset local + tokens de tema
+ * ------------------------------------------------------------------ */
+.fzwai-widget,
+.fzwai-widget *,
+.fzwai-widget *::before,
+.fzwai-widget *::after {
+	box-sizing: border-box;
+}
+
+.fzwai-widget {
+	/* Acento (sobrescrito inline). */
+	--fzwai-accent: #2f7ec4;
+	--fzwai-accent-contrast: #ffffff;
+	--fzwai-accent-soft: rgba( 47, 126, 196, .16 );
+
+	/* Superfícies e texto — tema claro. */
+	--fzwai-bg: #ffffff;
+	--fzwai-surface: #f4f6f9;
+	--fzwai-bot-bg: #eceff3;
+	--fzwai-text: #1f2430;
+	--fzwai-muted: #6b7280;
+	--fzwai-border: #e4e7ec;
+	--fzwai-user-text: var( --fzwai-accent-contrast );
+
+	/* Marca. */
+	--fzwai-wa: #25d366;
+	--fzwai-status: #2ecc71;
+
+	--fzwai-radius: 16px;
+	--fzwai-shadow: 0 12px 40px rgba( 0, 0, 0, .16 );
+
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", Helvetica, Arial, sans-serif;
+	font-size: 16px;
+	line-height: 1.5;
+	color: var( --fzwai-text );
+	-webkit-font-smoothing: antialiased;
+}
+
+@media ( prefers-color-scheme: dark ) {
+	.fzwai-widget {
+		--fzwai-bg: #12151b;
+		--fzwai-surface: #171b22;
+		--fzwai-bot-bg: #232833;
+		--fzwai-text: #e8eaed;
+		--fzwai-muted: #9aa3af;
+		--fzwai-border: #2a2f3a;
+		--fzwai-shadow: 0 12px 40px rgba( 0, 0, 0, .5 );
+	}
+}
+
+.fzwai-widget button {
+	font-family: inherit;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Posicionamento (float)
+ * ------------------------------------------------------------------ */
+.fzwai-widget--float {
+	position: fixed;
+	bottom: 20px;
+	z-index: 2147483000;
+}
+.fzwai-widget--float[data-position="right"] { right: 20px; }
+.fzwai-widget--float[data-position="left"] { left: 20px; }
+
+/* ------------------------------------------------------------------ *
+ *  Bolha
+ * ------------------------------------------------------------------ */
+.fzwai-bubble {
+	position: relative;
+	width: 60px;
+	height: 60px;
+	border: 0;
+	border-radius: 50%;
+	cursor: pointer;
+	background: var( --fzwai-accent );
+	color: var( --fzwai-accent-contrast );
+	box-shadow: 0 8px 24px rgba( 0, 0, 0, .22 );
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: transform .15s ease, box-shadow .2s ease;
+}
+.fzwai-bubble:hover { transform: translateY( -2px ) scale( 1.04 ); box-shadow: 0 12px 28px rgba( 0, 0, 0, .28 ); }
+.fzwai-bubble:active { transform: scale( .96 ); }
+.fzwai-bubble:focus-visible { outline: 3px solid var( --fzwai-accent-soft ); outline-offset: 3px; }
+
+.fzwai-ic {
+	position: absolute;
+	display: flex;
+	transition: opacity .18s ease, transform .18s ease;
+}
+.fzwai-ic-close { opacity: 0; transform: rotate( -90deg ) scale( .5 ); }
+.fzwai-widget--open .fzwai-ic-chat { opacity: 0; transform: rotate( 90deg ) scale( .5 ); }
+.fzwai-widget--open .fzwai-ic-close { opacity: 1; transform: none; }
+
+.fzwai-bubble-dot {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	width: 13px;
+	height: 13px;
+	border-radius: 50%;
+	background: #e74c3c;
+	border: 2px solid #fff;
+	animation: fzwai-pulse 2s infinite;
+}
+.fzwai-bubble-dot.is-hidden { display: none; }
+
+@keyframes fzwai-pulse {
+	0% { box-shadow: 0 0 0 0 rgba( 231, 76, 60, .55 ); }
+	70% { box-shadow: 0 0 0 8px rgba( 231, 76, 60, 0 ); }
+	100% { box-shadow: 0 0 0 0 rgba( 231, 76, 60, 0 ); }
+}
+
+/* ------------------------------------------------------------------ *
+ *  Painel
+ * ------------------------------------------------------------------ */
+.fzwai-panel {
+	display: flex;
+	flex-direction: column;
+	width: 374px;
+	height: min( 560px, 72vh );
+	max-height: 72vh;
+	background: var( --fzwai-bg );
+	border: 1px solid var( --fzwai-border );
+	border-radius: var( --fzwai-radius );
+	box-shadow: var( --fzwai-shadow );
+	overflow: hidden;
+}
+
+.fzwai-widget--float .fzwai-panel {
+	position: absolute;
+	bottom: 76px;
+	opacity: 0;
+	visibility: hidden;
+	pointer-events: none;
+	transform: translateY( 12px ) scale( .98 );
+	transform-origin: bottom right;
+	transition: opacity .18s ease, transform .18s ease, visibility 0s .18s;
+}
+.fzwai-widget--float[data-position="right"] .fzwai-panel { right: 0; transform-origin: bottom right; }
+.fzwai-widget--float[data-position="left"] .fzwai-panel { left: 0; transform-origin: bottom left; }
+
+.fzwai-widget--float.fzwai-widget--open .fzwai-panel {
+	opacity: 1;
+	visibility: visible;
+	pointer-events: auto;
+	transform: none;
+	transition: opacity .2s ease, transform .2s ease;
+}
+
+/* Inline (shortcode): sempre visível, sem bolha. */
+.fzwai-widget--inline { display: block; width: 100%; }
+.fzwai-widget--inline .fzwai-panel {
+	position: static;
+	width: 100%;
+	height: var( --fzwai-inline-height, 520px );
+	max-height: none;
+	opacity: 1;
+	visibility: visible;
+	transform: none;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Cabeçalho
+ * ------------------------------------------------------------------ */
+.fzwai-header {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 12px 14px;
+	background: var( --fzwai-accent );
+	color: var( --fzwai-accent-contrast );
+	flex: none;
+}
+.fzwai-avatar {
+	width: 38px;
+	height: 38px;
+	flex: none;
+	border-radius: 50%;
+	background: rgba( 255, 255, 255, .22 );
+	color: var( --fzwai-accent-contrast );
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-weight: 600;
+	font-size: 16px;
+}
+.fzwai-head-text { flex: 1 1 auto; min-width: 0; }
+.fzwai-title {
+	font-weight: 600;
+	font-size: 15px;
+	line-height: 1.25;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.fzwai-sub {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	opacity: .92;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.fzwai-status-dot {
+	width: 8px;
+	height: 8px;
+	flex: none;
+	border-radius: 50%;
+	background: var( --fzwai-status );
+	box-shadow: 0 0 0 2px rgba( 255, 255, 255, .25 );
+}
+.fzwai-head-actions { display: flex; gap: 2px; flex: none; }
+.fzwai-icon-btn {
+	background: transparent;
+	border: 0;
+	color: inherit;
+	cursor: pointer;
+	padding: 6px;
+	border-radius: 8px;
+	line-height: 0;
+	opacity: .85;
+	transition: background .15s ease, opacity .15s ease;
+}
+.fzwai-icon-btn:hover { background: rgba( 255, 255, 255, .18 ); opacity: 1; }
+.fzwai-icon-btn:focus-visible { outline: 2px solid rgba( 255, 255, 255, .7 ); outline-offset: 1px; }
+
+/* ------------------------------------------------------------------ *
+ *  Lista de mensagens
+ * ------------------------------------------------------------------ */
+.fzwai-messages {
+	flex: 1 1 auto;
+	overflow-y: auto;
+	overflow-x: hidden;
+	padding: 14px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	background: var( --fzwai-surface );
+	scroll-behavior: smooth;
+	overscroll-behavior: contain;
+}
+
+.fzwai-msg {
+	display: flex;
+	gap: 8px;
+	align-items: flex-end;
+	max-width: 100%;
+	animation: fzwai-in .22s ease both;
+}
+.fzwai-msg--user { flex-direction: row-reverse; }
+
+@keyframes fzwai-in {
+	from { opacity: 0; transform: translateY( 6px ); }
+	to { opacity: 1; transform: none; }
+}
+
+.fzwai-msg .fzwai-avatar {
+	width: 28px;
+	height: 28px;
+	font-size: 12px;
+	background: var( --fzwai-accent );
+	color: var( --fzwai-accent-contrast );
+	align-self: flex-end;
+}
+
+.fzwai-content {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	max-width: 82%;
+	min-width: 0;
+	align-items: flex-start;
+}
+.fzwai-msg--user .fzwai-content { align-items: flex-end; }
+
+.fzwai-bubble-msg {
+	padding: 9px 12px;
+	border-radius: 15px;
+	font-size: 14px;
+	line-height: 1.45;
+	max-width: 100%;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	word-break: break-word;
+}
+.fzwai-msg--bot .fzwai-bubble-msg {
+	background: var( --fzwai-bot-bg );
+	color: var( --fzwai-text );
+	border-bottom-left-radius: 5px;
+}
+.fzwai-msg--user .fzwai-bubble-msg {
+	background: var( --fzwai-accent );
+	color: var( --fzwai-user-text );
+	border-bottom-right-radius: 5px;
+}
+.fzwai-bubble-msg.fzwai-error {
+	background: #fdecea;
+	color: #a12622;
+}
+@media ( prefers-color-scheme: dark ) {
+	.fzwai-bubble-msg.fzwai-error { background: #3a1f1d; color: #f3b0ab; }
+}
+
+.fzwai-link { color: inherit; text-decoration: underline; }
+.fzwai-msg--bot .fzwai-link { color: var( --fzwai-accent ); }
+
+/* ------------------------------------------------------------------ *
+ *  "Digitando…"
+ * ------------------------------------------------------------------ */
+.fzwai-typing { display: inline-flex; gap: 4px; align-items: center; padding: 12px; }
+.fzwai-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var( --fzwai-muted );
+	opacity: .5;
+	animation: fzwai-bounce 1.2s infinite ease-in-out;
+}
+.fzwai-dot:nth-child( 2 ) { animation-delay: .15s; }
+.fzwai-dot:nth-child( 3 ) { animation-delay: .3s; }
+@keyframes fzwai-bounce {
+	0%, 60%, 100% { transform: translateY( 0 ); opacity: .4; }
+	30% { transform: translateY( -4px ); opacity: .9; }
+}
+
+/* ------------------------------------------------------------------ *
+ *  Protocolo + WhatsApp
+ * ------------------------------------------------------------------ */
+.fzwai-protocol {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 10px;
+	border-radius: 10px;
+	background: var( --fzwai-accent-soft );
+	border: 1px dashed var( --fzwai-accent );
+	font-size: 12px;
+	color: var( --fzwai-text );
+}
+.fzwai-protocol-label { color: var( --fzwai-muted ); }
+.fzwai-protocol-no { letter-spacing: .5px; font-size: 13px; }
+
+.fzwai-wa {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	padding: 9px 14px;
+	border-radius: 12px;
+	background: var( --fzwai-wa );
+	color: #fff;
+	text-decoration: none;
+	font-size: 13px;
+	font-weight: 600;
+	box-shadow: 0 3px 10px rgba( 37, 211, 102, .3 );
+	transition: filter .15s ease, transform .15s ease;
+}
+.fzwai-wa:hover { filter: brightness( 1.05 ); transform: translateY( -1px ); }
+.fzwai-wa:focus-visible { outline: 3px solid rgba( 37, 211, 102, .4 ); outline-offset: 2px; }
+
+/* ------------------------------------------------------------------ *
+ *  Formulário de contato
+ * ------------------------------------------------------------------ */
+.fzwai-contact {
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+	width: min( 280px, 100% );
+	background: var( --fzwai-bg );
+	border: 1px solid var( --fzwai-border );
+	padding: 12px;
+	border-radius: 14px;
+}
+.fzwai-contact label { font-size: 12px; color: var( --fzwai-muted ); }
+.fzwai-field {
+	border: 1px solid var( --fzwai-border );
+	border-radius: 10px;
+	padding: 8px 10px;
+	font: inherit;
+	font-size: 14px;
+	background: var( --fzwai-bg );
+	color: var( --fzwai-text );
+	outline: none;
+}
+.fzwai-field:focus { border-color: var( --fzwai-accent ); box-shadow: 0 0 0 3px var( --fzwai-accent-soft ); }
+.fzwai-confirm {
+	align-self: flex-start;
+	margin-top: 2px;
+	background: var( --fzwai-accent );
+	color: var( --fzwai-accent-contrast );
+	border: 0;
+	border-radius: 10px;
+	padding: 8px 18px;
+	font: inherit;
+	font-weight: 600;
+	cursor: pointer;
+}
+.fzwai-confirm:hover { filter: brightness( 1.05 ); }
+
+/* ------------------------------------------------------------------ *
+ *  Barra de entrada + rodapé
+ * ------------------------------------------------------------------ */
+.fzwai-input {
+	display: flex;
+	gap: 8px;
+	align-items: flex-end;
+	padding: 10px;
+	border-top: 1px solid var( --fzwai-border );
+	background: var( --fzwai-bg );
+	flex: none;
+}
+.fzwai-text {
+	flex: 1 1 auto;
+	resize: none;
+	border: 1px solid var( --fzwai-border );
+	border-radius: 12px;
+	padding: 9px 12px;
+	font: inherit;
+	font-size: 14px;
+	line-height: 1.4;
+	max-height: 120px;
+	background: var( --fzwai-bg );
+	color: var( --fzwai-text );
+	outline: none;
+	transition: border-color .15s ease, box-shadow .15s ease;
+}
+.fzwai-text::placeholder { color: var( --fzwai-muted ); }
+.fzwai-text:focus { border-color: var( --fzwai-accent ); box-shadow: 0 0 0 3px var( --fzwai-accent-soft ); }
+.fzwai-text:disabled { opacity: .6; }
+
+.fzwai-send {
+	flex: none;
+	width: 40px;
+	height: 40px;
+	border: 0;
+	border-radius: 12px;
+	background: var( --fzwai-accent );
+	color: var( --fzwai-accent-contrast );
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: filter .15s ease, transform .1s ease;
+}
+.fzwai-send:hover { filter: brightness( 1.06 ); }
+.fzwai-send:active { transform: scale( .94 ); }
+.fzwai-send:disabled { opacity: .5; cursor: default; }
+.fzwai-send:focus-visible { outline: 3px solid var( --fzwai-accent-soft ); outline-offset: 2px; }
+
+.fzwai-foot {
+	flex: none;
+	text-align: center;
+	padding: 6px 8px 8px;
+	font-size: 11px;
+	color: var( --fzwai-muted );
+	background: var( --fzwai-bg );
+}
+
+/* ------------------------------------------------------------------ *
+ *  Scrollbar sutil (WebKit)
+ * ------------------------------------------------------------------ */
+.fzwai-messages::-webkit-scrollbar { width: 8px; }
+.fzwai-messages::-webkit-scrollbar-thumb { background: rgba( 128, 128, 128, .35 ); border-radius: 8px; }
+.fzwai-messages::-webkit-scrollbar-track { background: transparent; }
+
+/* ------------------------------------------------------------------ *
+ *  Mobile: painel em tela cheia
+ * ------------------------------------------------------------------ */
+@media ( max-width: 480px ) {
+	.fzwai-widget--float { bottom: 16px; }
+	.fzwai-widget--float[data-position="right"] { right: 16px; }
+	.fzwai-widget--float[data-position="left"] { left: 16px; }
+
+	.fzwai-widget--float .fzwai-panel {
+		position: fixed;
+		inset: 0;
+		width: 100vw;
+		height: 100vh;
+		height: 100dvh;
+		max-height: none;
+		border-radius: 0;
+		border: 0;
+		transform-origin: center;
+	}
+}
+
+/* ------------------------------------------------------------------ *
+ *  Movimento reduzido
+ * ------------------------------------------------------------------ */
+@media ( prefers-reduced-motion: reduce ) {
+	.fzwai-widget *,
+	.fzwai-widget *::before,
+	.fzwai-widget *::after {
+		animation-duration: .001ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: .001ms !important;
+		scroll-behavior: auto !important;
+	}
+}

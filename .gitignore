@@ -1,0 +1,20 @@
+# Dados e artefatos — nunca versionar
+bin/dist/
+*.gguf
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+fzwai-data/
+runtime/
+
+# Segredos
+*.key
+*.pem
+*-secrets*
+
+# Ruído
+*.log
+.DS_Store
+node_modules/
+vendor/
+*.zip
