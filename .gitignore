@@ -18,3 +18,5 @@ runtime/
 node_modules/
 vendor/
 *.zip
+fzwai-config.php
+standalone/data/
