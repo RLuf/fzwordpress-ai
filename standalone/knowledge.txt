@@ -1,0 +1,14 @@
+# Exemplo de base de conhecimento
+
+Substitua este arquivo pelo conteúdo do seu negócio. Escreva um assunto por
+parágrafo (blocos separados por linha em branco). O bot usa busca léxica simples
+sobre estes parágrafos para responder com base no que você escrever aqui.
+
+## Sobre a empresa
+Descreva sua empresa: o que faz, há quanto tempo, diferenciais, cidade, contato.
+
+## Produtos e serviços
+Liste seus produtos e serviços com preços e o que cada um inclui.
+
+## Atendimento e contato
+Telefone, WhatsApp, e-mail, horários. O bot encaminha ao WhatsApp quando não sabe.
