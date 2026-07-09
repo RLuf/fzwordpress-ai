@@ -40,13 +40,15 @@ class FZWAI_Widget {
 	 * @return void
 	 */
 	public static function boot() {
-		if ( ! FZWAI_Settings::get( 'widget_enabled', 1 ) ) {
-			return;
-		}
-
+		// O shortcode [fzwai_chat] e seus assets funcionam mesmo com a bolha
+		// flutuante desligada (permite embutir o chat só numa página).
 		add_action( 'wp_enqueue_scripts', array( __CLASS__, 'enqueue' ) );
-		add_action( 'wp_footer', array( __CLASS__, 'render_float' ), 100 );
 		add_shortcode( 'fzwai_chat', array( __CLASS__, 'shortcode' ) );
+
+		// A bolha flutuante em todas as páginas depende do widget_enabled.
+		if ( FZWAI_Settings::get( 'widget_enabled', 1 ) ) {
+			add_action( 'wp_footer', array( __CLASS__, 'render_float' ), 100 );
+		}
 	}
 
 	/**

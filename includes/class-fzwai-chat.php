@@ -88,18 +88,28 @@ class FZWAI_Chat {
 				return self::response( $answer . "\n\n" . $ask, null, null, true, $session );
 			}
 
-			$protocol = FZWAI_Protocol::open( array(
-				'question'        => $message,
-				'ai_answer'       => $answer,
-				'visitor_name'    => $name,
-				'visitor_contact' => $contact,
-				'page_url'        => $pageUrl,
-				'ip'              => $ip,
-			) );
-
-			$handoffMsg = $protocol['handoff']['message'];
-			$reply      = $answer . "\n\n" . $handoffMsg;
-			return self::response( $reply, $protocol['protocol_no'], $protocol['handoff'], false, $session );
+			try {
+				$protocol = FZWAI_Protocol::open( array(
+					'question'        => $message,
+					'ai_answer'       => $answer,
+					'visitor_name'    => $name,
+					'visitor_contact' => $contact,
+					'page_url'        => $pageUrl,
+					'ip'              => $ip,
+				) );
+				$handoffMsg = $protocol['handoff']['message'];
+				$reply      = $answer . "\n\n" . $handoffMsg;
+				return self::response( $reply, $protocol['protocol_no'], $protocol['handoff'], false, $session );
+			} catch ( \Throwable $e ) {
+				// Nunca deixa o endpoint quebrar por falha ao abrir protocolo:
+				// degrada para resposta com WhatsApp direto (sem número de protocolo).
+				$wa = '';
+				if ( ! empty( $s['whatsapp_number'] ) ) {
+					$num = preg_replace( '/\D/', '', (string) $s['whatsapp_number'] );
+					$wa  = "\n\n" . sprintf( __( 'Você pode falar direto com nosso atendimento pelo WhatsApp: https://wa.me/%s', 'fzwordpress-ai' ), $num );
+				}
+				return self::response( $answer . $wa, null, null, false, $session );
+			}
 		}
 
 		return self::response( $answer, null, null, false, $session );

@@ -81,18 +81,33 @@ class FZWAI_LLM {
 		}
 		$prompt .= "Assistente:";
 
+		// -no-cnv = geração única (sem modo conversa). O llama-cli ecoa o prompt
+		// antes da resposta; removemos esse eco em PHP (robusto a mudanças de flag).
 		$cmd = escapeshellarg( $bin )
 			. ' -m ' . escapeshellarg( $model )
 			. ' -p ' . escapeshellarg( $prompt )
 			. ' -n ' . (int) $maxtok
 			. ' --temp ' . escapeshellarg( (string) $temp )
-			. ' --no-display-prompt -st 2>/dev/null';
+			. ' -no-cnv 2>/dev/null';
 
-		$out = self::run( $cmd, 120 );
+		$out = self::run( $cmd, 150 );
 		if ( $out === null ) {
 			return array( 'ok' => false, 'text' => '', 'error' => 'falha ao executar llama.cpp', 'backend' => 'llamacpp' );
 		}
-		return array( 'ok' => trim( $out ) !== '', 'text' => trim( $out ), 'error' => '', 'backend' => 'llamacpp' );
+		$out = (string) $out;
+		// Remove o eco do prompt, se presente no início da saída.
+		$pos = strpos( $out, $prompt );
+		if ( 0 === $pos ) {
+			$out = substr( $out, strlen( $prompt ) );
+		} else {
+			// Alguns builds ecoam só o texto do prompt sem o rótulo final; corta após "Assistente:".
+			$marker = strrpos( $out, 'Assistente:' );
+			if ( false !== $marker ) {
+				$out = substr( $out, $marker + strlen( 'Assistente:' ) );
+			}
+		}
+		$text = trim( $out );
+		return array( 'ok' => $text !== '', 'text' => $text, 'error' => $text === '' ? 'resposta vazia' : '', 'backend' => 'llamacpp' );
 	}
 
 	// ------------------------------------------------------- OpenAI-compatível

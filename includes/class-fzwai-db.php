@@ -32,7 +32,17 @@ class FZWAI_DB {
 	}
 
 	public function path() {
-		return trailingslashit( FZWAI_DATA_DIR ) . 'fzwai.sqlite';
+		// Nome randômico por instalação: mesmo que o .htaccess seja ignorado
+		// (nginx/AllowOverride None), o caminho do banco com PII não é adivinhável.
+		// Operadores podem ainda mover tudo para fora do web root via a constante
+		// FZWAI_DATA_DIR no wp-config.php.
+		$name = get_option( 'fzwai_db_name', '' );
+		if ( '' === $name || ! preg_match( '/^fzwai-[a-z0-9]{8,}\.sqlite$/', $name ) ) {
+			$rand = function_exists( 'wp_generate_password' ) ? wp_generate_password( 20, false, false ) : substr( md5( uniqid( '', true ) ), 0, 20 );
+			$name = 'fzwai-' . strtolower( preg_replace( '/[^a-z0-9]/i', '', $rand ) ) . '.sqlite';
+			update_option( 'fzwai_db_name', $name );
+		}
+		return trailingslashit( FZWAI_DATA_DIR ) . $name;
 	}
 
 	/**

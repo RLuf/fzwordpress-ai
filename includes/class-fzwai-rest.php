@@ -25,7 +25,17 @@ class FZWAI_REST {
 			'callback'            => array( __CLASS__, 'chat' ),
 			'permission_callback' => array( __CLASS__, 'public_permission' ),
 			'args'                => array(
-				'message'    => array( 'required' => true, 'type' => 'string' ),
+				'message'    => array(
+					'required'          => true,
+					'type'              => 'string',
+					// Limite anti-abuso: mensagens gigantes inflam custo/tokens e o banco.
+					'validate_callback' => function ( $v ) {
+						return is_string( $v ) && strlen( $v ) <= 2000;
+					},
+					'sanitize_callback' => function ( $v ) {
+						return substr( (string) $v, 0, 2000 );
+					},
+				),
 				'session_id' => array( 'required' => false, 'type' => 'string' ),
 				'name'       => array( 'required' => false, 'type' => 'string' ),
 				'contact'    => array( 'required' => false, 'type' => 'string' ),
@@ -46,7 +56,8 @@ class FZWAI_REST {
 	 * recebem um nonce válido via wp_create_nonce('wp_rest') no widget.
 	 */
 	public static function public_permission( $request ) {
-		// Rate limit simples por IP (transient).
+		// Rate limit por IP (transient) + backstop global — o IP pode ser forjado
+		// via X-Forwarded-For, então um teto global evita abuso mesmo assim.
 		$ip  = self::client_ip();
 		$key = 'fzwai_rl_' . md5( $ip );
 		$hits = (int) get_transient( $key );
@@ -54,6 +65,13 @@ class FZWAI_REST {
 			return new WP_Error( 'fzwai_rate', __( 'Muitas mensagens em pouco tempo. Aguarde um instante.', 'fzwordpress-ai' ), array( 'status' => 429 ) );
 		}
 		set_transient( $key, $hits + 1, MINUTE_IN_SECONDS );
+
+		$gkey  = 'fzwai_rl_global';
+		$ghits = (int) get_transient( $gkey );
+		if ( $ghits > 300 ) { // 300 req/min no site inteiro
+			return new WP_Error( 'fzwai_rate', __( 'Atendimento com alta demanda no momento. Tente novamente em instantes.', 'fzwordpress-ai' ), array( 'status' => 429 ) );
+		}
+		set_transient( $gkey, $ghits + 1, MINUTE_IN_SECONDS );
 		return true;
 	}
 

@@ -15,6 +15,7 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 // Remove opções do plugin.
 delete_option( 'fzwai_settings' );
 delete_option( 'fzwai_sqlite_missing' );
+delete_option( 'fzwai_db_name' );
 
 // Limpa evento agendado de reindexação, se houver.
 $ts = wp_next_scheduled( 'fzwai_reindex_event' );

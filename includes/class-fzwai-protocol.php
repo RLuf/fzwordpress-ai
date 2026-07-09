@@ -12,44 +12,68 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class FZWAI_Protocol {
 
+	/** substr seguro para UTF-8 (mb_substr é opcional em alguns servidores). */
+	private static function sub( $str, $start, $len ) {
+		$str = (string) $str;
+		return function_exists( 'mb_substr' ) ? mb_substr( $str, $start, $len ) : substr( $str, $start, $len );
+	}
+
 	/**
 	 * Abre um protocolo e retorna os dados (inclui handoff de WhatsApp).
+	 * Concorrência-segura: tenta gerar/inserir com número novo se houver colisão
+	 * na constraint UNIQUE (duas aberturas simultâneas no mesmo dia).
 	 *
-	 * @param array $data question, ai_answer, visitor_name, visitor_contact, page_url, ip, session_id, protocol_id_ref
+	 * @param array $data question, ai_answer, visitor_name, visitor_contact, page_url, ip
 	 * @return array ['protocol_no','id','handoff'=>['type','url','message'],'created_at']
 	 */
 	public static function open( array $data ) {
-		$s        = FZWAI_Settings::all();
-		$db       = FZWAI_DB::instance()->pdo();
-		$now      = FZWAI_DB::now();
-		$protocol = self::generate_number( $s['protocol_prefix'] );
+		$s   = FZWAI_Settings::all();
+		$db  = FZWAI_DB::instance()->pdo();
+		$now = FZWAI_DB::now();
 
 		$stmt = $db->prepare( 'INSERT INTO fzwai_protocols
 			(protocol_no, visitor_name, visitor_contact, question, ai_answer, status, handoff, page_url, ip, created_at, updated_at)
 			VALUES (:pn,:vn,:vc,:q,:aa,:st,:ho,:pu,:ip,:ca,:ua)' );
 		$handoffType = ! empty( $s['whatsapp_number'] ) ? 'whatsapp' : 'none';
-		$stmt->execute( array(
-			':pn' => $protocol,
-			':vn' => isset( $data['visitor_name'] ) ? mb_substr( (string) $data['visitor_name'], 0, 120 ) : '',
-			':vc' => isset( $data['visitor_contact'] ) ? mb_substr( (string) $data['visitor_contact'], 0, 120 ) : '',
-			':q'  => (string) $data['question'],
-			':aa' => isset( $data['ai_answer'] ) ? (string) $data['ai_answer'] : '',
-			':st' => 'open',
-			':ho' => $handoffType,
-			':pu' => isset( $data['page_url'] ) ? esc_url_raw( $data['page_url'] ) : '',
-			':ip' => isset( $data['ip'] ) ? (string) $data['ip'] : '',
-			':ca' => $now,
-			':ua' => $now,
-		) );
-		$id = (int) $db->lastInsertId();
+
+		$protocol = '';
+		$id       = 0;
+		$attempts = 0;
+		while ( $attempts < 6 ) {
+			$attempts++;
+			$protocol = self::generate_number( $s['protocol_prefix'] );
+			try {
+				$stmt->execute( array(
+					':pn' => $protocol,
+					':vn' => self::sub( isset( $data['visitor_name'] ) ? $data['visitor_name'] : '', 0, 120 ),
+					':vc' => self::sub( isset( $data['visitor_contact'] ) ? $data['visitor_contact'] : '', 0, 120 ),
+					':q'  => (string) $data['question'],
+					':aa' => isset( $data['ai_answer'] ) ? (string) $data['ai_answer'] : '',
+					':st' => 'open',
+					':ho' => $handoffType,
+					':pu' => isset( $data['page_url'] ) ? esc_url_raw( $data['page_url'] ) : '',
+					':ip' => isset( $data['ip'] ) ? (string) $data['ip'] : '',
+					':ca' => $now,
+					':ua' => $now,
+				) );
+				$id = (int) $db->lastInsertId();
+				break;
+			} catch ( \PDOException $e ) {
+				// Colisão de UNIQUE por concorrência → tenta outro número.
+				if ( false !== stripos( $e->getMessage(), 'unique' ) && $attempts < 6 ) {
+					continue;
+				}
+				throw $e; // outro erro (ou esgotou tentativas) → sobe para o chamador tratar
+			}
+		}
 
 		$handoff = self::build_handoff( $s, $protocol, $data );
 
 		return array(
-			'id'         => $id,
+			'id'          => $id,
 			'protocol_no' => $protocol,
-			'handoff'    => $handoff,
-			'created_at' => $now,
+			'handoff'     => $handoff,
+			'created_at'  => $now,
 		);
 	}
 
@@ -102,7 +126,7 @@ class FZWAI_Protocol {
 		$waText = sprintf(
 			'Olá! Abri o protocolo %s no site. Minha dúvida: %s',
 			$protocol,
-			isset( $data['question'] ) ? mb_substr( (string) $data['question'], 0, 300 ) : ''
+			isset( $data['question'] ) ? self::sub( $data['question'], 0, 300 ) : ''
 		);
 		$number = preg_replace( '/\D/', '', (string) $s['whatsapp_number'] );
 		$url    = 'https://wa.me/' . $number . '?text=' . rawurlencode( $waText );
