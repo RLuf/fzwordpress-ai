@@ -23,10 +23,52 @@ class FZWAI_LLM {
 	 */
 	public static function chat( array $messages, array $opts = array() ) {
 		$s        = FZWAI_Settings::all();
-		$backend  = $s['backend'];
 		$temp     = isset( $opts['temperature'] ) ? (float) $opts['temperature'] : (float) $s['temperature'];
 		$maxtok   = isset( $opts['max_tokens'] ) ? (int) $opts['max_tokens'] : (int) $s['max_tokens'];
 
+		// Tenta o backend selecionado primeiro; se falhar, cai para os demais
+		// que estiverem configurados — um backend fora do ar não pode derrubar
+		// o atendimento inteiro quando existe alternativa funcional.
+		$order  = array_values( array_unique( array_merge( array( $s['backend'] ), array( 'openai', 'ollama', 'llamacpp' ) ) ) );
+		$errors = array();
+		foreach ( $order as $backend ) {
+			if ( ! self::is_configured( $backend, $s ) ) {
+				continue;
+			}
+			$r = self::chat_backend( $backend, $messages, $temp, $maxtok, $s );
+			if ( $r['ok'] ) {
+				if ( $errors ) {
+					error_log( 'fzwai: backend "' . $backend . '" respondeu após falha de: ' . implode( ' | ', $errors ) );
+				}
+				return $r;
+			}
+			$errors[] = $backend . ': ' . $r['error'];
+		}
+
+		$detail = $errors ? implode( ' | ', $errors ) : 'nenhum backend de LLM configurado';
+		error_log( 'fzwai: todos os backends de LLM falharam — ' . $detail );
+		return array( 'ok' => false, 'text' => '', 'error' => $detail, 'backend' => $s['backend'] );
+	}
+
+	/**
+	 * O backend tem o mínimo de configuração para valer uma tentativa?
+	 */
+	private static function is_configured( $backend, $s ) {
+		switch ( $backend ) {
+			case 'openai':
+				return '' !== trim( (string) $s['openai_base'] );
+			case 'llamacpp':
+				return '' !== (string) $s['llamacpp_bin'] && '' !== (string) $s['llamacpp_model'];
+			case 'ollama':
+				return '' !== trim( (string) $s['ollama_url'] );
+		}
+		return false;
+	}
+
+	/**
+	 * Despacha para o adaptador de um backend específico.
+	 */
+	private static function chat_backend( $backend, $messages, $temp, $maxtok, $s ) {
 		switch ( $backend ) {
 			case 'llamacpp':
 				return self::chat_llamacpp( $messages, $temp, $maxtok, $s );

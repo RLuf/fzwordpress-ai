@@ -56,23 +56,32 @@ class FZWAI_REST {
 	 * recebem um nonce válido via wp_create_nonce('wp_rest') no widget.
 	 */
 	public static function public_permission( $request ) {
-		// Rate limit por IP (transient) + backstop global — o IP pode ser forjado
-		// via X-Forwarded-For, então um teto global evita abuso mesmo assim.
-		$ip  = self::client_ip();
-		$key = 'fzwai_rl_' . md5( $ip );
-		$hits = (int) get_transient( $key );
-		if ( $hits > 30 ) { // 30 req/min por IP
+		// Rate limit por IP + backstop global. A chave usa REMOTE_ADDR (não
+		// forjável), NÃO os headers X-Forwarded-For/CF-Connecting-IP — girar o
+		// header dava uma chave nova a cada request e anulava o limite.
+		$addr = isset( $_SERVER['REMOTE_ADDR'] ) ? (string) $_SERVER['REMOTE_ADDR'] : 'unknown';
+		if ( ! self::rl_allow( 'fzwai_rl_' . md5( $addr ), 30 ) ) { // 30 req/min por IP
 			return new WP_Error( 'fzwai_rate', __( 'Muitas mensagens em pouco tempo. Aguarde um instante.', 'fzwordpress-ai' ), array( 'status' => 429 ) );
 		}
-		set_transient( $key, $hits + 1, MINUTE_IN_SECONDS );
-
-		$gkey  = 'fzwai_rl_global';
-		$ghits = (int) get_transient( $gkey );
-		if ( $ghits > 300 ) { // 300 req/min no site inteiro
+		if ( ! self::rl_allow( 'fzwai_rl_global', 300 ) ) { // 300 req/min no site inteiro
 			return new WP_Error( 'fzwai_rate', __( 'Atendimento com alta demanda no momento. Tente novamente em instantes.', 'fzwordpress-ai' ), array( 'status' => 429 ) );
 		}
-		set_transient( $gkey, $ghits + 1, MINUTE_IN_SECONDS );
 		return true;
+	}
+
+	/**
+	 * Janela FIXA de 60s: {contagem, início}. O modelo antigo renovava o TTL a
+	 * cada request (janela deslizante), então o contador global só zerava após
+	 * 60s de silêncio TOTAL no site — com tráfego contínuo, 429 permanente.
+	 */
+	private static function rl_allow( $key, $limit ) {
+		$bucket = get_transient( $key );
+		if ( ! is_array( $bucket ) || ! isset( $bucket['t'] ) || ( time() - (int) $bucket['t'] ) >= MINUTE_IN_SECONDS ) {
+			$bucket = array( 'n' => 0, 't' => time() );
+		}
+		$bucket['n']++;
+		set_transient( $key, $bucket, 2 * MINUTE_IN_SECONDS );
+		return $bucket['n'] <= $limit;
 	}
 
 	public static function chat( WP_REST_Request $request ) {
@@ -116,13 +125,20 @@ class FZWAI_REST {
 		), 200 );
 	}
 
+	/**
+	 * Melhor palpite do IP real do visitante — SÓ para registro/forense
+	 * (fzwai_protocols.ip). Nunca usar como chave de rate limit: os headers
+	 * são forjáveis por quem fala direto com o origin.
+	 */
 	public static function client_ip() {
 		foreach ( array( 'HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR' ) as $h ) {
 			if ( ! empty( $_SERVER[ $h ] ) ) {
-				$ip = explode( ',', wp_unslash( $_SERVER[ $h ] ) )[0];
-				return sanitize_text_field( trim( $ip ) );
+				$ip = trim( explode( ',', wp_unslash( $_SERVER[ $h ] ) )[0] );
+				if ( filter_var( $ip, FILTER_VALIDATE_IP ) ) {
+					return $ip;
+				}
 			}
 		}
-		return '';
+		return isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( (string) $_SERVER['REMOTE_ADDR'] ) : '';
 	}
 }
