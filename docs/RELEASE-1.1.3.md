@@ -61,3 +61,9 @@ O hotfix não alterou opções, SQLite ou schema. Para rollback:
 
 Node.js não existe no host, portanto `node --check` não foi executado. O
 JavaScript foi coberto pela guarda estática e pelo teste HTTP real.
+
+O PHPCS/WPCS formal, executado com o binário disponível no repositório do
+provisionador, ainda aponta dívida anterior de estilo/documentação e regras
+incompatíveis com o backend standalone. Portanto esta release **não declara
+conformidade WPCS integral**; a aprovação acima cobre sintaxe, regressão de
+autenticação e comportamento HTTP.
