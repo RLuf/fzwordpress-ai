@@ -238,8 +238,15 @@ class FZWAI_LLM {
 			if ( is_wp_error( $resp ) ) {
 				return array( 'ok' => false, 'detail' => $resp->get_error_message() );
 			}
-			$json   = json_decode( wp_remote_retrieve_body( $resp ), true );
-			$models = isset( $json['models'] ) ? wp_list_pluck( $json['models'], 'name' ) : array();
+			$code = (int) wp_remote_retrieve_response_code( $resp );
+			if ( 200 !== $code ) {
+				return array( 'ok' => false, 'detail' => 'HTTP ' . $code . ' em /api/tags' );
+			}
+			$json = json_decode( wp_remote_retrieve_body( $resp ), true );
+			if ( ! is_array( $json ) || ! isset( $json['models'] ) ) {
+				return array( 'ok' => false, 'detail' => 'resposta não parece ser de um servidor Ollama' );
+			}
+			$models = wp_list_pluck( $json['models'], 'name' );
 			return array( 'ok' => true, 'detail' => count( $models ) . ' modelos: ' . implode( ', ', array_slice( $models, 0, 8 ) ) );
 		}
 		if ( 'llamacpp' === $s['backend'] ) {

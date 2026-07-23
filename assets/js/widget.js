@@ -27,6 +27,7 @@
 	var LS_HISTORY = 'fzwai_history';
 	var LS_NAME    = 'fzwai_name';
 	var LS_CONTACT = 'fzwai_contact';
+	var LS_EMAIL   = 'fzwai_email';
 	var LS_SEEN    = 'fzwai_seen';
 
 	var MAX_HISTORY = 100;
@@ -185,11 +186,15 @@
 		// --- Estado da instância ---
 		var session        = getSession();
 		var history        = loadHistory();
-		var visitor        = { name: lsGet( LS_NAME ) || '', contact: lsGet( LS_CONTACT ) || '' };
+		var visitor        = { name: lsGet( LS_NAME ) || '', contact: lsGet( LS_CONTACT ) || '', email: lsGet( LS_EMAIL ) || '' };
 		var pendingMessage = null;
 		var busy           = false;
 		var greeted        = history.length > 0;
+		var gated          = false; // formulário de gate exibido nesta instância
 		var typingEl       = null;
+		var idleTimer      = null;
+		var IDLE_MS        = 25 * 60 * 1000; // limpa a sessão após 25 min sem atividade
+		var gen            = 0;  // token de geração: invalida callbacks de sessões já limpas
 
 		/* ---------------- DOM: cabeçalho, lista, input ---------------- */
 
@@ -308,7 +313,10 @@
 		}
 
 		function waButton( handoff ) {
-			var label = ( handoff.message && String( handoff.message ) ) ? String( handoff.message ) : t( 'whatsapp', 'Falar no WhatsApp' );
+			// Rótulo curto e fixo: handoff.message é a frase inteira do protocolo,
+			// que o servidor já colocou no corpo da resposta — usá-la aqui duplicava
+			// a mensagem e virava um botão de um parágrafo.
+			var label = t( 'whatsapp', 'Falar no WhatsApp' );
 			var a = el( 'a', {
 				'class': 'fzwai-wa', 'href': handoff.url, 'target': '_blank', 'rel': 'noopener noreferrer', html: ICON_WA
 			} );
@@ -430,6 +438,8 @@
 			scrollBottom();
 			window.setTimeout( function () { nameInput.focus(); }, reduceMotion ? 0 : 60 );
 
+			form.addEventListener( 'input', bumpIdle );
+
 			form.addEventListener( 'submit', function ( e ) {
 				e.preventDefault();
 				var name = nameInput.value.trim();
@@ -453,6 +463,167 @@
 			} );
 		}
 
+		/* ---------------- Gate de pré-cadastro (nome/celular/e-mail) ---------------- */
+
+		function emailValid( v ) {
+			return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test( String( v || '' ) );
+		}
+		function phoneValid( v ) {
+			return ( String( v || '' ).replace( /\D/g, '' ).length >= 10 );
+		}
+		function gateOk() {
+			return !! ( visitor.name && phoneValid( visitor.contact ) && emailValid( visitor.email ) );
+		}
+
+		// Exibe o formulário obrigatório de abertura e bloqueia o input até
+		// o visitante informar nome completo + celular + e-mail.
+		function requireGate() {
+			if ( gated || gateOk() ) { return; }
+			gated = true;
+			setBusy( true ); // trava input/enviar enquanto o gate não é satisfeito
+
+			var nameInput = el( 'input', { 'type': 'text', 'class': 'fzwai-field', 'id': uid + '-g-name', 'autocomplete': 'name', 'placeholder': t( 'name_ph', '' ) } );
+			nameInput.value = visitor.name || '';
+			var phoneInput = el( 'input', { 'type': 'tel', 'class': 'fzwai-field', 'id': uid + '-g-phone', 'autocomplete': 'tel', 'placeholder': t( 'contact_ph', '' ) } );
+			phoneInput.value = visitor.contact || '';
+			var mailInput = el( 'input', { 'type': 'email', 'class': 'fzwai-field', 'id': uid + '-g-mail', 'autocomplete': 'email', 'placeholder': t( 'email_ph', '' ) } );
+			mailInput.value = visitor.email || '';
+			var errEl = el( 'div', { 'class': 'fzwai-form-err', 'aria-live': 'polite' } );
+
+			var form = el( 'form', { 'class': 'fzwai-bubble-msg fzwai-contact fzwai-gate' }, [
+				el( 'p', { 'class': 'fzwai-form-intro', text: t( 'gate_intro', '' ) } ),
+				el( 'label', { 'for': uid + '-g-name', text: t( 'name_label', 'Nome completo' ) } ),
+				nameInput,
+				el( 'label', { 'for': uid + '-g-phone', text: t( 'contact_label', 'Celular / WhatsApp' ) } ),
+				phoneInput,
+				el( 'label', { 'for': uid + '-g-mail', text: t( 'email_label', 'E-mail' ) } ),
+				mailInput,
+				errEl,
+				el( 'button', { 'type': 'submit', 'class': 'fzwai-confirm', text: t( 'gate_start', 'Iniciar atendimento' ) } )
+			] );
+
+			var wrap = el( 'div', { 'class': 'fzwai-msg fzwai-msg--bot' }, [ avatarNode(), el( 'div', { 'class': 'fzwai-content' }, [ form ] ) ] );
+			list.appendChild( wrap );
+			scrollBottom();
+			window.setTimeout( function () { nameInput.focus(); }, reduceMotion ? 0 : 60 );
+
+			form.addEventListener( 'input', bumpIdle ); // digitar mantém a sessão viva
+
+			form.addEventListener( 'submit', function ( e ) {
+				e.preventDefault();
+				var name = nameInput.value.trim();
+				var phone = phoneInput.value.trim();
+				var mail = mailInput.value.trim();
+				if ( ! name ) { errEl.textContent = t( 'gate_invalid_name', 'Informe seu nome completo.' ); nameInput.focus(); return; }
+				if ( ! phoneValid( phone ) ) { errEl.textContent = t( 'gate_invalid_phone', 'Informe um celular válido.' ); phoneInput.focus(); return; }
+				if ( ! emailValid( mail ) ) { errEl.textContent = t( 'gate_invalid_email', 'Informe um e-mail válido.' ); mailInput.focus(); return; }
+
+				visitor.name = name;
+				visitor.contact = phone;
+				visitor.email = mail;
+				lsSet( LS_NAME, name );
+				lsSet( LS_CONTACT, phone );
+				lsSet( LS_EMAIL, mail );
+
+				if ( wrap.parentNode ) { wrap.parentNode.removeChild( wrap ); }
+				gated = false;
+				setBusy( false );
+				if ( ! greeted ) { greet(); }
+				window.setTimeout( function () { input.focus(); }, reduceMotion ? 0 : 60 );
+			} );
+		}
+
+		/* ---------------- Formulário de solicitação de suporte ---------------- */
+
+		function showSupportForm() {
+			var subjInput = el( 'input', { 'type': 'text', 'class': 'fzwai-field', 'id': uid + '-s-subj', 'maxlength': '120', 'placeholder': t( 'support_subject_ph', '' ) } );
+			var msgInput = el( 'textarea', { 'class': 'fzwai-field fzwai-textarea', 'id': uid + '-s-msg', 'maxlength': '2000', 'rows': '4', 'placeholder': t( 'support_message_ph', '' ) } );
+			var fileInput = el( 'input', { 'type': 'file', 'class': 'fzwai-file', 'id': uid + '-s-file', 'accept': 'image/*' } );
+			var errEl = el( 'div', { 'class': 'fzwai-form-err', 'aria-live': 'polite' } );
+			var sendBtnS = el( 'button', { 'type': 'submit', 'class': 'fzwai-confirm', text: t( 'support_send', 'Enviar solicitação' ) } );
+			var cancelBtn = el( 'button', { 'type': 'button', 'class': 'fzwai-cancel', text: t( 'cancel', 'Cancelar' ) } );
+
+			var form = el( 'form', { 'class': 'fzwai-bubble-msg fzwai-contact fzwai-support' }, [
+				el( 'label', { 'for': uid + '-s-subj', text: t( 'support_subject_label', 'Assunto' ) } ),
+				subjInput,
+				el( 'label', { 'for': uid + '-s-msg', text: t( 'support_message_label', 'Mensagem' ) } ),
+				msgInput,
+				el( 'label', { 'for': uid + '-s-file', text: t( 'support_photo_label', 'Anexar 1 foto (opcional)' ) } ),
+				fileInput,
+				errEl,
+				el( 'div', { 'class': 'fzwai-form-actions' }, [ sendBtnS, cancelBtn ] )
+			] );
+
+			var wrap = el( 'div', { 'class': 'fzwai-msg fzwai-msg--bot' }, [ avatarNode(), el( 'div', { 'class': 'fzwai-content' }, [ form ] ) ] );
+			list.appendChild( wrap );
+			scrollBottom();
+			window.setTimeout( function () { subjInput.focus(); }, reduceMotion ? 0 : 60 );
+
+			cancelBtn.addEventListener( 'click', function () {
+				if ( wrap.parentNode ) { wrap.parentNode.removeChild( wrap ); }
+			} );
+
+			form.addEventListener( 'input', bumpIdle ); // digitar/anexar mantém a sessão viva
+
+			form.addEventListener( 'submit', function ( e ) {
+				e.preventDefault();
+				errEl.textContent = '';
+				var subject = subjInput.value.trim();
+				var message = msgInput.value.trim();
+				if ( ! subject ) { errEl.textContent = t( 'support_need_subject', 'Informe o assunto.' ); subjInput.focus(); return; }
+				if ( ! message ) { errEl.textContent = t( 'support_need_message', 'Escreva a mensagem.' ); msgInput.focus(); return; }
+
+				var file = ( fileInput.files && fileInput.files.length ) ? fileInput.files[0] : null;
+				if ( file ) {
+					if ( file.size > 5 * 1024 * 1024 ) { errEl.textContent = t( 'support_photo_big', 'A imagem excede 5 MB.' ); return; }
+					if ( ! /^image\//.test( file.type ) ) { errEl.textContent = t( 'support_photo_type', 'O anexo precisa ser uma imagem (JPG, PNG ou WebP).' ); return; }
+				}
+
+				var fd = new FormData();
+				fd.append( 'session_id', session );
+				fd.append( 'name', visitor.name );
+				fd.append( 'contact', visitor.contact );
+				fd.append( 'email', visitor.email );
+				fd.append( 'subject', subject );
+				fd.append( 'message', message );
+				fd.append( 'page_url', window.location.href );
+				if ( file ) { fd.append( 'photo', file ); }
+
+				sendBtnS.disabled = true;
+				cancelBtn.disabled = true;
+				sendBtnS.textContent = t( 'support_sending', 'Enviando…' );
+
+				window.fetch( CFG.support, {
+					method: 'POST',
+					credentials: 'omit',
+					body: fd
+				} ).then( function ( res ) {
+					return res.json().then( function ( d ) { return { ok: res.ok, data: d }; }, function () { return { ok: res.ok, data: {} }; } );
+				} ).then( function ( r ) {
+					if ( r.ok && r.data && r.data.ok ) {
+						if ( wrap.parentNode ) { wrap.parentNode.removeChild( wrap ); }
+						var proto = r.data.protocol || '';
+						var okText = t( 'support_ok', 'Solicitação enviada! Protocolo {protocolo}.' ).replace( '{protocolo}', proto );
+						renderBot( { text: okText, protocol: null, handoff: null }, { instant: true } );
+						// Chamado enviado: limpa a sessão (mantém a confirmação na tela;
+						// a próxima abertura começa do zero).
+						clearSession( false );
+					} else {
+						var em = ( r.data && r.data.error ) ? r.data.error : t( 'error', 'Estamos com instabilidade, tente novamente.' );
+						errEl.textContent = em;
+						sendBtnS.disabled = false;
+						cancelBtn.disabled = false;
+						sendBtnS.textContent = t( 'support_send', 'Enviar solicitação' );
+					}
+				} ).catch( function () {
+					errEl.textContent = t( 'error', 'Estamos com instabilidade, tente novamente.' );
+					sendBtnS.disabled = false;
+					cancelBtn.disabled = false;
+					sendBtnS.textContent = t( 'support_send', 'Enviar solicitação' );
+				} );
+			} );
+		}
+
 		/* ---------------- Fluxo de envio ---------------- */
 
 		function setBusy( b ) {
@@ -461,9 +632,12 @@
 			sendBtn.disabled = b;
 		}
 
-		function onError() {
+		function onError( serverMsg ) {
 			hideTyping();
-			renderBot( { text: t( 'error', 'Estamos com instabilidade, tente novamente.' ), protocol: null, handoff: null }, { instant: true, cls: 'fzwai-error' } );
+			// Mostra a mensagem que o servidor mandou (ex.: aviso de rate limit,
+			// que orienta a esperar) em vez de reduzir tudo a "instabilidade".
+			var text = ( serverMsg && typeof serverMsg === 'string' ) ? serverMsg : t( 'error', 'Estamos com instabilidade, tente novamente.' );
+			renderBot( { text: text, protocol: null, handoff: null }, { instant: true, cls: 'fzwai-error' } );
 			setBusy( false );
 		}
 
@@ -474,9 +648,11 @@
 			var protocol = ( typeof data.protocol === 'string' && data.protocol ) ? data.protocol : null;
 			var handoff = normHandoff( data.handoff );
 			var needContact = !! data.need_contact;
+			var supportForm = !! data.support_form;
 
 			var finalize = function () {
-				if ( needContact ) { pendingMessage = originalMessage; showContactForm(); }
+				if ( supportForm ) { showSupportForm(); }
+				else if ( needContact ) { pendingMessage = originalMessage; showContactForm(); }
 				setBusy( false );
 			};
 
@@ -495,6 +671,7 @@
 			opts = opts || {};
 			message = ( message == null ? '' : String( message ) ).trim();
 			if ( busy ) { return; }
+			bumpIdle();
 
 			if ( ! opts.silentUser ) {
 				if ( ! message ) { return; }
@@ -507,28 +684,42 @@
 			setBusy( true );
 			showTyping();
 
+			var myGen = gen; // se a sessão for limpa antes da resposta, descarta o callback
 			var body = { session_id: session, message: message, page_url: window.location.href };
 			var name = ( opts.name != null ) ? opts.name : visitor.name;
 			var contact = ( opts.contact != null ) ? opts.contact : visitor.contact;
 			if ( name ) { body.name = name; }
 			if ( contact ) { body.contact = contact; }
+			if ( visitor.email ) { body.email = visitor.email; }
 
 			var tStart = Date.now();
 
+			// Sem X-WP-Nonce: o endpoint é público (a permissão não valida nonce)
+			// e um nonce vencido embutido em página cacheada fazia o WP devolver
+			// 403 rest_cookie_invalid_nonce para TODO request do visitante.
 			window.fetch( CFG.rest, {
 				method: 'POST',
-				credentials: 'same-origin',
-				headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': CFG.nonce },
+				credentials: 'omit',
+				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify( body )
 			} ).then( function ( res ) {
-				if ( ! res.ok ) { throw new Error( 'HTTP ' + res.status ); }
+				if ( ! res.ok ) {
+					// Tenta aproveitar a mensagem de erro do WP (ex.: rate limit).
+					return res.json().then( function ( err ) {
+						var msg = ( err && typeof err.message === 'string' ) ? err.message.replace( /<[^>]*>/g, '' ) : '';
+						throw new Error( msg || ( 'HTTP ' + res.status ) );
+					}, function () { throw new Error( 'HTTP ' + res.status ); } );
+				}
 				return res.json();
 			} ).then( function ( data ) {
+				if ( myGen !== gen ) { return; } // sessão limpa durante a requisição
 				var wait = reduceMotion ? 0 : Math.max( 0, humanDelay() - ( Date.now() - tStart ) );
-				window.setTimeout( function () { onReply( data, message ); }, wait );
-			} ).catch( function () {
+				window.setTimeout( function () { if ( myGen === gen ) { onReply( data, message ); } }, wait );
+			} ).catch( function ( e ) {
+				if ( myGen !== gen ) { return; }
 				var wait = reduceMotion ? 0 : Math.max( 0, 400 - ( Date.now() - tStart ) );
-				window.setTimeout( onError, wait );
+				var serverMsg = ( e && e.message && ! /^HTTP \d+$/.test( e.message ) ) ? e.message : null;
+				window.setTimeout( function () { if ( myGen === gen ) { onError( serverMsg ); } }, wait );
 			} );
 		}
 
@@ -538,9 +729,11 @@
 			greeted = true;
 			var text = interpolate( CFG.greeting || '', { assistente: assistant, empresa: business, assistant: assistant, business: business } );
 			if ( ! text ) { return; }
+			var myGen = gen;
 			showTyping();
 			var delay = reduceMotion ? 0 : humanDelay();
 			window.setTimeout( function () {
+				if ( myGen !== gen ) { return; } // sessão limpa antes da saudação aparecer
 				hideTyping();
 				var m = { role: 'assistant', text: text, protocol: null, handoff: null };
 				pushHistory( m );
@@ -557,27 +750,57 @@
 			lsSet( LS_SEEN, '1' );
 			var dot = mount.querySelector( '.fzwai-bubble-dot' );
 			if ( dot ) { dot.classList.add( 'is-hidden' ); }
-			if ( ! greeted ) { greet(); }
+			// Gate obrigatório: sem nome/celular/e-mail, pede os dados antes de tudo.
+			if ( ! gateOk() ) { requireGate(); }
+			else if ( ! greeted ) { greet(); }
 			window.setTimeout( function () { input.focus(); }, reduceMotion ? 0 : 160 );
 			scrollBottom();
+			bumpIdle();
+		}
+
+		// Limpa a conversa (histórico + sessão). Mantém os dados do gate
+		// (nome/celular/e-mail) para o visitante recorrente não recadastrar.
+		// wipeDom=true zera também as bolhas na tela.
+		function clearSession( wipeDom ) {
+			gen++; // invalida qualquer callback (reply/greet/typing) em voo da sessão anterior
+			history = [];
+			saveHistory( history );
+			lsDel( LS_SESSION );
+			lsDel( LS_HISTORY );
+			session = getSession();
+			greeted = false;
+			pendingMessage = null;
+			gated = false;
+			hideTyping();
+			setBusy( false ); // uma requisição em voo não pode deixar o input travado
+			if ( idleTimer ) { window.clearTimeout( idleTimer ); idleTimer = null; }
+			if ( wipeDom ) { while ( list.firstChild ) { list.removeChild( list.firstChild ); } }
+		}
+
+		// Reinicia o cronômetro de inatividade a cada interação.
+		function bumpIdle() {
+			if ( idleTimer ) { window.clearTimeout( idleTimer ); }
+			idleTimer = window.setTimeout( function () {
+				clearSession( true );
+				if ( isOpen ) {
+					if ( ! gateOk() ) { requireGate(); }
+					else { greet(); }
+				}
+			}, IDLE_MS );
 		}
 
 		function close() {
 			isOpen = false;
 			mount.classList.remove( 'fzwai-widget--open' );
 			if ( bubble ) { bubble.setAttribute( 'aria-expanded', 'false' ); bubble.focus(); }
+			// Limpa ao fechar: a próxima abertura começa do zero (sem texto antigo).
+			clearSession( true );
 		}
 
 		function reset() {
-			history = [];
-			saveHistory( history );
-			lsDel( LS_SESSION );
-			session = getSession();
-			greeted = false;
-			pendingMessage = null;
-			while ( list.firstChild ) { list.removeChild( list.firstChild ); }
-			greet();
-			window.setTimeout( function () { input.focus(); }, reduceMotion ? 0 : 60 );
+			clearSession( true );
+			if ( ! gateOk() ) { requireGate(); }
+			else { greet(); window.setTimeout( function () { input.focus(); }, reduceMotion ? 0 : 60 ); }
 		}
 
 		/* ---------------- Auto-grow do textarea ---------------- */
@@ -621,8 +844,11 @@
 		for ( var h = 0; h < history.length; h++ ) { renderFromHistory( history[ h ] ); }
 		scrollBottom();
 
-		// Inline já está aberto: se não houver histórico, saúda imediatamente.
-		if ( isInline && ! greeted ) { greet(); }
+		// Inline já está aberto: gate obrigatório antes da saudação.
+		if ( isInline ) {
+			if ( ! gateOk() ) { requireGate(); }
+			else if ( ! greeted ) { greet(); }
+		}
 	}
 
 	/* ---------------------------------------------------------------- *

@@ -4,7 +4,7 @@ Tags: chatbot, atendimento, ai, rag, whatsapp, suporte, ollama, llama
 Requires at least: 5.6
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.1.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -70,10 +70,19 @@ Ao abrir um protocolo, o plugin gera um link `wa.me` com o número do atendiment
 
 == Changelog ==
 
+= 1.1.3 =
+* Remove nonce e cookies de sessão das chamadas públicas de chat e suporte.
+* Mantém capacidade e nonce obrigatórios em todas as ações administrativas.
+* Adiciona teste de regressão do limite entre REST público e AJAX administrativo.
+
+= 1.1.2 =
+* Adiciona identificação inicial do visitante e solicitação de suporte por e-mail com protocolo e foto opcional.
+* Adiciona limites de sessão, histórico e mensagens mais claras para falhas do backend.
+
 = 1.0.0 =
 * Versão inicial: widget de chat, RAG em SQLite, três backends de IA (Ollama, llama.cpp, API online), protocolos e encaminhamento por WhatsApp.
 
 == Upgrade Notice ==
 
-= 1.0.0 =
-Versão inicial.
+= 1.1.3 =
+Evita falhas do widget público causadas por autenticação expirada em páginas cacheadas.

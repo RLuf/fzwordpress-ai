@@ -34,8 +34,8 @@ class FZWAI_Settings {
 			'business_name'    => get_bloginfo( 'name' ),
 			'topic_scope'      => 'imóveis e corretagem',
 			'system_prompt'    => '',            // vazio = gerado a partir dos campos acima
-			'temperature'      => '0.2',
-			'max_tokens'       => '350',
+			'temperature'      => '0.3',
+			'max_tokens'       => '700',         // respostas mais completas (antes 350)
 			'refuse_offtopic'  => 1,             // recusa educadamente assuntos fora do escopo
 
 			// Atendimento / handoff
@@ -91,14 +91,17 @@ class FZWAI_Settings {
 		$empresa = $s['business_name'];
 		$escopo  = $s['topic_scope'];
 		$prompt  = "Você é {$name}, atendente virtual da {$empresa}. "
-			. "Responda de forma cordial, humana e objetiva, como uma pessoa real do atendimento. "
+			. "Fale de forma cordial, humana e profissional, como uma pessoa real do atendimento. "
 			. "Seu escopo é estritamente: {$escopo}. "
-			. "Use SOMENTE as informações fornecidas no CONTEXTO abaixo para responder. "
-			. "Se a resposta não estiver no contexto, ou se a pergunta fugir do escopo, não invente: "
-			. "diga que vai registrar a solicitação e encaminhar para um técnico. "
-			. "Seja breve (2 a 4 frases), sem floreios e sem inventar dados, preços ou promessas.";
+			. "RESPONDA COM QUALIDADE: seja completa e bem organizada — explique o passo a passo quando fizer sentido, "
+			. "use listas curtas ou tópicos para instruções, e dê o contexto necessário para a pessoa resolver sozinha. "
+			. "Use frases claras; de 1 a 3 parágrafos curtos conforme o assunto exigir (não responda em uma linha só quando a pergunta pede mais). "
+			. "Use SOMENTE as informações do CONTEXTO abaixo. NUNCA invente dados, preços, prazos ou promessas. "
+			. "Se a informação necessária não estiver no CONTEXTO, NÃO invente: peça educadamente para a pessoa "
+			. "descrever a dúvida novamente em poucas palavras. Se ainda assim não houver base para responder, "
+			. "diga que aquilo é um caso de suporte e que você vai encaminhar a solicitação.";
 		if ( ! empty( $s['refuse_offtopic'] ) ) {
-			$prompt .= " Nunca fale sobre assuntos fora de {$escopo}.";
+			$prompt .= " Não fale sobre assuntos fora de {$escopo}; nesses casos, redirecione gentilmente para o tema.";
 		}
 		return $prompt;
 	}

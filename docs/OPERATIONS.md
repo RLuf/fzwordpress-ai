@@ -29,6 +29,7 @@ Antes de atualizar:
 - pergunta fora do escopo é recusada;
 - protocolo e handoff funcionam;
 - widget anônimo funciona com cache;
+- HTML antigo foi purgado do cache após instalar uma versão que remove nonce;
 - rate limit recupera após a janela;
 - erro externo aparece no diagnóstico sem segredo.
 
@@ -36,7 +37,7 @@ Antes de atualizar:
 
 | Sintoma | Verificar |
 |---|---|
-| widget `403` após horas | nonce público/cache; risco conhecido em `AGENTS.md` |
+| widget `403` após upgrade de versão anterior | purgar cache de página/CDN e confirmar que o JS carregado não envia `X-WP-Nonce` |
 | resposta genérica repetida | log sanitizado do backend, SQLite e modelo |
 | RAG vazio | fontes, indexação, permissões e extensão SQLite |
 | `429` permanente | bucket/janela e transients antigos |

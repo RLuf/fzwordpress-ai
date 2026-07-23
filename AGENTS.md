@@ -8,18 +8,20 @@ Plugin WordPress independente para atendimento, RAG, protocolos e handoff por
 WhatsApp. Ele não participa do provisionamento nem do MCP. A integração com a
 Plataforma ImovelSite 2.0 deve permanecer opcional.
 
-## 2. Estado e risco conhecido
+## 2. Estado da autenticação pública
 
-O widget público ainda envia `X-WP-Nonce`. Em página cacheada, nonce expirado
-pode ser rejeitado pelo WordPress antes do callback público. Antes de declarar
-produção:
+Desde a versão `1.1.3`, o widget público não recebe nem envia `X-WP-Nonce`
+ou cookies de sessão.
+Isso é intencional: um nonce REST em página cacheada expira e pode ser recusado
+pelo núcleo do WordPress antes do callback público.
 
-1. remover nonce do widget/objeto público;
-2. manter nonce apenas no AJAX administrativo;
-3. validar visitante anônimo com página cacheada e nonce antigo;
-4. atualizar código, testes e documentação juntos.
+Preservar obrigatoriamente:
 
-Não ocultar esse risco em README ou release.
+1. rota pública sem dependência de sessão ou nonce;
+2. rate limit por IP de origem e limite global;
+3. capacidade e nonce em todo AJAX administrativo;
+4. teste de regressão `tests/PublicWidgetSecurityTest.php`;
+5. purge do cache de página/CDN ao atualizar instalações anteriores à `1.1.3`.
 
 ## 3. Regras de segurança
 
@@ -51,6 +53,7 @@ Não ocultar esse risco em README ou release.
 ```bash
 find . -name '*.php' -print0 | xargs -0 -n1 php -l
 bash -n bin/install.sh bin/build-llama.sh
+php tests/PublicWidgetSecurityTest.php
 git diff --check
 ```
 

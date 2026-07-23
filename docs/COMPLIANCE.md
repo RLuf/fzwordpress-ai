@@ -10,7 +10,7 @@ segurança jurídica e técnica.
 | **Sem código ofuscado** | Todo o PHP/JS é legível; nada minificado-sem-fonte. | — |
 | **Sanitização de entrada** | `sanitize_text_field`, `esc_url_raw`, `absint`, `wp_strip_all_tags` nas entradas; REST com `args` tipados. | Revisar o admin (campos novos). |
 | **Escape de saída** | `esc_html`, `esc_attr`, `esc_url`, `wp_kses_post` na UI; respostas REST via `WP_REST_Response`. | — |
-| **Nonces + capabilities** | Admin sob `manage_options` + nonce; REST público com nonce `wp_rest` e rate-limit por IP. | Confirmar nonce em todas as ações AJAX do admin. |
+| **Nonces + capabilities** | Admin sob `manage_options` + nonce; REST público sem sessão/nonce e com rate-limit por IP. | Confirmar nonce em todas as ações AJAX do admin e ausência de `X-WP-Nonce` no widget. |
 | **Prefixação** | Tudo prefixado `fzwai_` / `FZWAI_` (funções, classes, options, tabelas, hooks). | — |
 | **Text domain = slug** | `fzwordpress-ai` em todo `__()/esc_html__()`; `.pot` incluído. | Rodar `wp i18n make-pot` para cobertura total. |
 | **Sem "phone home" sem consentimento** | Nenhuma telemetria. Dados só vão ao backend de IA que o operador configurar. | — |

@@ -4,7 +4,7 @@ Plugin WordPress de **pré-atendimento com IA**: entende a dúvida do visitante,
 
 Comercializável sob **GPL-2.0-or-later** (venda suporte, hospedagem e serviços em cima).
 
-> **Estado:** desenvolvimento/homologação. Não faz parte do caminho crítico de
+> **Estado:** versão `1.1.3` em homologação. Não faz parte do caminho crítico de
 > provisionamento do ImovelSite.
 
 ## Navegação
@@ -19,6 +19,7 @@ Comercializável sob **GPL-2.0-or-later** (venda suporte, hospedagem e serviços
 
 ```
 Visitante ─▶ Widget de chat (JS)  ─▶  REST /wp-json/fzwai/v1/chat
+                                   └▶  REST /wp-json/fzwai/v1/support
                                           │
                                           ▼
                             FZWAI_Chat (orquestração)
@@ -58,7 +59,7 @@ O build por tag: `git tag v1.0 && git push origin v1.0` aciona `.github/workflow
 |---|---|
 | Backend | `ollama_url`, `ollama_model` · `llamacpp_bin`, `llamacpp_model` · `openai_base`, `openai_key`, `openai_model` |
 | Persona | `assistant_name`, `business_name`, `topic_scope`, `system_prompt`, `temperature`, `max_tokens`, `refuse_offtopic` |
-| Atendimento | `whatsapp_number`, `handoff_message`, `ask_contact`, `protocol_prefix` |
+| Atendimento | identificação do visitante, `whatsapp_number`, `handoff_message`, `ask_contact`, `protocol_prefix` e solicitação de suporte por e-mail |
 | Widget | `widget_enabled`, `widget_title`, `widget_greeting`, `widget_color`, `widget_position` |
 
 ## Privacidade e segurança
@@ -67,8 +68,9 @@ O build por tag: `git tag v1.0 && git push origin v1.0` aciona `.github/workflow
 - Diretório de dados bloqueado ao acesso web; SQLite fora do alcance público.
 - Endpoint público com rate limit; operações administrativas exigem capacidade
   e nonce; entradas são validadas e consultas usam prepared statements.
-- Existe uma pendência documentada sobre `X-WP-Nonce` no widget público antes
-  da declaração de produção; veja [AGENTS.md](AGENTS.md).
+- O widget público não envia nonce ou credencial de sessão. Isso evita falhas
+  `403` causadas por nonces expirados em páginas cacheadas. O AJAX
+  administrativo continua protegido por capacidade e nonce.
 
 ## Comercialização
 
@@ -80,7 +82,7 @@ Licença GPL-2.0-or-later. O código é aberto; o modelo de negócio é venda de
 fzwordpress-ai/
 ├── fzwordpress-ai.php          # bootstrap, ativação (schema SQLite)
 ├── uninstall.php               # remoção limpa (guardada por realpath)
-├── includes/                   # DB, Settings, LLM, Embeddings, RAG, Protocol, Chat, REST, Widget, Admin, Llama
+├── includes/                   # DB, Settings, LLM, RAG, Protocol, Support, Chat, REST, Widget e Admin
 ├── assets/                     # widget.js/css, admin.js/css
 ├── bin/                        # install.sh, build-llama.sh
 ├── .github/workflows/          # build-llama.yml (tag v*), lint.yml

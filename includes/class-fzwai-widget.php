@@ -4,7 +4,7 @@
  *
  * Responsável apenas pela camada de apresentação no site: enfileira o CSS/JS,
  * imprime o ponto de montagem no rodapé e injeta a configuração pública
- * (FZWAI_WIDGET) com textos, cores, WhatsApp e a URL/nonce do endpoint REST.
+ * (FZWAI_WIDGET) com textos, cores, WhatsApp e as URLs REST públicas.
  * A conversa em si é resolvida pelo endpoint POST /wp-json/fzwai/v1/chat
  * (construído em FZWAI_REST); aqui nada de IA, só a "cara" do produto.
  *
@@ -79,7 +79,7 @@ class FZWAI_Widget {
 	 * Monta o objeto de configuração exposto ao JS.
 	 *
 	 * Tudo aqui é público (o front-end o lê). Nenhum segredo é incluído: só
-	 * textos de exibição, cores, número de WhatsApp e a URL/nonce do REST.
+	 * textos de exibição, cores, número de WhatsApp e URLs REST públicas.
 	 *
 	 * @return array
 	 */
@@ -88,7 +88,7 @@ class FZWAI_Widget {
 
 		return array(
 			'rest'      => esc_url_raw( rest_url( 'fzwai/v1/chat' ) ),
-			'nonce'     => wp_create_nonce( 'wp_rest' ),
+			'support'   => esc_url_raw( rest_url( 'fzwai/v1/support' ) ),
 			'version'   => FZWAI_VERSION,
 			'title'     => (string) self::val( $s, 'widget_title', __( 'Posso ajudar?', 'fzwordpress-ai' ) ),
 			'greeting'  => (string) self::val( $s, 'widget_greeting', '' ),
@@ -120,15 +120,38 @@ class FZWAI_Widget {
 			'typing'        => __( 'digitando…', 'fzwordpress-ai' ),
 			'error'         => __( 'Estamos com instabilidade, tente novamente.', 'fzwordpress-ai' ),
 			'need_contact'  => __( 'Para eu registrar seu atendimento, poderia me informar seu nome e telefone?', 'fzwordpress-ai' ),
-			'name_label'    => __( 'Seu nome', 'fzwordpress-ai' ),
-			'name_ph'       => __( 'Como podemos te chamar?', 'fzwordpress-ai' ),
-			'contact_label' => __( 'Telefone / WhatsApp', 'fzwordpress-ai' ),
+			'name_label'    => __( 'Nome completo', 'fzwordpress-ai' ),
+			'name_ph'       => __( 'Seu nome completo', 'fzwordpress-ai' ),
+			'contact_label' => __( 'Celular / WhatsApp', 'fzwordpress-ai' ),
 			'contact_ph'    => __( '(00) 00000-0000', 'fzwordpress-ai' ),
+			'email_label'   => __( 'E-mail', 'fzwordpress-ai' ),
+			'email_ph'      => __( 'seu@email.com', 'fzwordpress-ai' ),
 			'confirm'       => __( 'Confirmar', 'fzwordpress-ai' ),
 			'protocol'      => __( 'Protocolo', 'fzwordpress-ai' ),
 			'whatsapp'      => __( 'Falar no WhatsApp', 'fzwordpress-ai' ),
 			'restart'       => __( 'Iniciar nova conversa', 'fzwordpress-ai' ),
 			'powered'       => __( 'Atendimento inteligente', 'fzwordpress-ai' ),
+			// Gate de pré-cadastro.
+			'gate_intro'    => __( 'Antes de começar, precisamos de alguns dados para o atendimento:', 'fzwordpress-ai' ),
+			'gate_start'    => __( 'Iniciar atendimento', 'fzwordpress-ai' ),
+			'gate_invalid_name'  => __( 'Informe seu nome completo.', 'fzwordpress-ai' ),
+			'gate_invalid_phone' => __( 'Informe um celular válido.', 'fzwordpress-ai' ),
+			'gate_invalid_email' => __( 'Informe um e-mail válido.', 'fzwordpress-ai' ),
+			// Fluxo de solicitação de suporte.
+			'support_start'   => __( 'Solicitar suporte', 'fzwordpress-ai' ),
+			'support_subject_label' => __( 'Assunto', 'fzwordpress-ai' ),
+			'support_subject_ph'    => __( 'Resumo do que você precisa', 'fzwordpress-ai' ),
+			'support_message_label' => __( 'Mensagem', 'fzwordpress-ai' ),
+			'support_message_ph'    => __( 'Descreva sua solicitação em detalhes', 'fzwordpress-ai' ),
+			'support_photo_label'   => __( 'Anexar 1 foto (opcional)', 'fzwordpress-ai' ),
+			'support_send'    => __( 'Enviar solicitação', 'fzwordpress-ai' ),
+			'support_sending' => __( 'Enviando…', 'fzwordpress-ai' ),
+			'support_ok'      => __( 'Solicitação enviada! Protocolo {protocolo}. Nossa equipe responderá no e-mail informado.', 'fzwordpress-ai' ),
+			'support_need_subject' => __( 'Informe o assunto.', 'fzwordpress-ai' ),
+			'support_need_message' => __( 'Escreva a mensagem.', 'fzwordpress-ai' ),
+			'support_photo_big'    => __( 'A imagem excede 5 MB.', 'fzwordpress-ai' ),
+			'support_photo_type'   => __( 'O anexo precisa ser uma imagem (JPG, PNG ou WebP).', 'fzwordpress-ai' ),
+			'cancel'          => __( 'Cancelar', 'fzwordpress-ai' ),
 		);
 	}
 

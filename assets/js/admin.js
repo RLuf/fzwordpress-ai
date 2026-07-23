@@ -298,32 +298,6 @@
 		} );
 	}
 
-	function handleCloseProtocol( btn ) {
-		var row = btn.closest( '[data-protocol-id]' );
-		if ( ! row ) {
-			return;
-		}
-		if ( ! window.confirm( I18N.confirm_close || 'Fechar?' ) ) {
-			return;
-		}
-		var id = row.getAttribute( 'data-protocol-id' );
-		btn.disabled = true;
-		ajax( 'fzwai_close_protocol', { protocol_id: id } ).then( function ( res ) {
-			if ( res && res.success ) {
-				setPill( qs( '.fzwai-status-cell', row ), 'closed', res.data && res.data.label );
-				if ( btn.parentNode ) {
-					btn.parentNode.removeChild( btn );
-				}
-			} else {
-				btn.disabled = false;
-				window.alert( serverMessage( res, I18N.error ) );
-			}
-		} ).catch( function () {
-			btn.disabled = false;
-			window.alert( I18N.network_error || I18N.error );
-		} );
-	}
-
 	/**
 	 * Delegação única de clique para os botões de ação por linha.
 	 */
@@ -343,9 +317,6 @@
 					break;
 				case 'reindex':
 					handleReindex( btn );
-					break;
-				case 'close':
-					handleCloseProtocol( btn );
 					break;
 			}
 		} );

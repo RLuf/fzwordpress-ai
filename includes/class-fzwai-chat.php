@@ -13,8 +13,23 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class FZWAI_Chat {
 
-	/** Pontuação mínima do RAG para considerar o contexto utilizável. */
-	const RELEVANCE_MIN = 0.35;
+	/**
+	 * Pontuação mínima do RAG para considerar o contexto utilizável.
+	 * Atenção à escala: sem embeddings o RAG devolve score léxico
+	 * (freq. de termos / sqrt(tokens do chunk)), tipicamente 0.05–0.2 —
+	 * bem abaixo da escala de cosseno. 0.35 descartava contexto válido.
+	 */
+	const RELEVANCE_MIN = 0.05;
+
+	/** Quantas mensagens anteriores da sessão vão junto no prompt. */
+	const HISTORY_TURNS = 8;
+
+	/** Cota anti-abuso: máximo de mensagens do visitante por sessão em 12h. */
+	const SESSION_MSG_LIMIT = 20;
+	const SESSION_WINDOW_HOURS = 12;
+
+	/** Tentativas de compreensão antes de abrir o formulário de suporte. */
+	const MAX_UNDERSTAND_TRIES = 2;
 
 	/**
 	 * Processa uma mensagem do visitante.
@@ -25,15 +40,51 @@ class FZWAI_Chat {
 	public static function handle( array $req ) {
 		$s       = FZWAI_Settings::all();
 		$session = isset( $req['session_id'] ) ? sanitize_text_field( $req['session_id'] ) : wp_generate_uuid4();
-		$message = isset( $req['message'] ) ? trim( wp_strip_all_tags( (string) $req['message'] ) ) : '';
+		// Remove só o que parece tag HTML de verdade: wp_strip_all_tags/strip_tags
+		// engoliria tudo de um '<' solto em diante ("apartamento < 300 mil").
+		$message = isset( $req['message'] ) ? trim( preg_replace( '#<[a-zA-Z/!][^>]*>#', '', (string) $req['message'] ) ) : '';
 		$name    = isset( $req['name'] ) ? sanitize_text_field( $req['name'] ) : '';
 		$contact = isset( $req['contact'] ) ? sanitize_text_field( $req['contact'] ) : '';
+		$email   = isset( $req['email'] ) ? sanitize_email( $req['email'] ) : '';
 		$pageUrl = isset( $req['page_url'] ) ? esc_url_raw( $req['page_url'] ) : '';
 		$ip      = isset( $req['ip'] ) ? $req['ip'] : '';
+
+		// Gate: com os três dados (base de prospecção), grava/atualiza o contato.
+		if ( '' !== $name && '' !== $contact && '' !== $email && FZWAI_DB::available() ) {
+			try {
+				FZWAI_DB::instance()->save_contact( $session, array(
+					'name'     => $name,
+					'phone'    => $contact,
+					'email'    => $email,
+					'page_url' => $pageUrl,
+					'ip'       => $ip,
+				) );
+			} catch ( \Throwable $e ) {
+				// prospecção é best-effort; não bloqueia o atendimento
+			}
+		}
 
 		if ( '' === $message ) {
 			return self::response( __( 'Pode me dizer em que posso ajudar?', 'fzwordpress-ai' ), null, null, false, $session );
 		}
+
+		// Cota anti-abuso: 20 mensagens do visitante por sessão em 12h.
+		if ( FZWAI_DB::available() ) {
+			try {
+				$used = FZWAI_DB::instance()->count_user_messages( $session, self::SESSION_WINDOW_HOURS );
+				if ( $used >= self::SESSION_MSG_LIMIT ) {
+					return self::response(
+						__( 'Você atingiu o limite de mensagens desta conversa (20 em 12 horas). Por favor, tente novamente mais tarde ou fale com o nosso suporte.', 'fzwordpress-ai' ),
+						null, null, false, $session
+					);
+				}
+			} catch ( \Throwable $e ) {
+				// se a contagem falhar, não trava o atendimento
+			}
+		}
+
+		// Histórico da sessão ANTES de gravar a mensagem atual (senão ela duplica).
+		$history = self::recent_history( $session, self::HISTORY_TURNS );
 
 		self::log_message( $session, 'user', $message );
 
@@ -59,14 +110,19 @@ class FZWAI_Chat {
 				. "\n\n(Não há contexto disponível na base de conhecimento para esta pergunta.)";
 		}
 
-		$messages = array(
-			array( 'role' => 'system', 'content' => $system ),
-			array( 'role' => 'user', 'content' => $userBlock ),
+		$messages = array_merge(
+			array( array( 'role' => 'system', 'content' => $system ) ),
+			$history,
+			array( array( 'role' => 'user', 'content' => $userBlock ) )
 		);
 
 		// 3) Chama o LLM.
 		$llm     = FZWAI_LLM::chat( $messages );
 		$answer  = $llm['ok'] ? $llm['text'] : '';
+		if ( ! $llm['ok'] ) {
+			// Sem isso a falha real (ex.: connection refused) some sem rastro.
+			error_log( 'fzwai: LLM falhou (backend=' . $llm['backend'] . '): ' . $llm['error'] );
+		}
 
 		// 4) Decide se precisa encaminhar (sem contexto, LLM falhou, ou sinal de "não sei").
 		$needsHandoff = self::should_handoff( $hasContext, $llm, $answer );
@@ -79,40 +135,54 @@ class FZWAI_Chat {
 
 		self::log_message( $session, 'assistant', $answer, $results );
 
-		// 5) Handoff: se precisa e (já temos contato OU não exigimos contato) → abre protocolo.
+		// 5) Escalonamento educado (2 tentativas → formulário de suporte).
+		//    Em vez de abrir chamado direto, a Ana tenta entender; na 1ª falha
+		//    pede para reformular; na 2ª falha consecutiva abre o formulário de
+		//    solicitação de suporte (que é enviado por e-mail). O WhatsApp segue
+		//    disponível como opção paralela.
+		$failKey = 'fzwai_fail_' . md5( $session );
+
 		if ( $needsHandoff ) {
-			$askContact = ! empty( $s['ask_contact'] );
-			if ( $askContact && '' === $contact && '' === $name ) {
-				// Pede dados antes de abrir o protocolo.
-				$ask = __( 'Posso te encaminhar para um de nossos técnicos. Para isso, me diz seu nome e um telefone/WhatsApp para contato?', 'fzwordpress-ai' );
-				return self::response( $answer . "\n\n" . $ask, null, null, true, $session );
+			$fails = (int) get_transient( $failKey ) + 1;
+
+			if ( $fails < self::MAX_UNDERSTAND_TRIES ) {
+				// 1ª falha: pede para descrever de novo, em poucas palavras.
+				set_transient( $failKey, $fails, self::SESSION_WINDOW_HOURS * HOUR_IN_SECONDS );
+				$ask = __( 'Desculpe, não consegui entender bem. Você pode descrever sua dúvida novamente, em poucas palavras?', 'fzwordpress-ai' );
+				return self::response( $answer . "\n\n" . $ask, null, null, false, $session );
 			}
 
-			try {
-				$protocol = FZWAI_Protocol::open( array(
-					'question'        => $message,
-					'ai_answer'       => $answer,
-					'visitor_name'    => $name,
-					'visitor_contact' => $contact,
-					'page_url'        => $pageUrl,
-					'ip'              => $ip,
-				) );
-				$handoffMsg = $protocol['handoff']['message'];
-				$reply      = $answer . "\n\n" . $handoffMsg;
-				return self::response( $reply, $protocol['protocol_no'], $protocol['handoff'], false, $session );
-			} catch ( \Throwable $e ) {
-				// Nunca deixa o endpoint quebrar por falha ao abrir protocolo:
-				// degrada para resposta com WhatsApp direto (sem número de protocolo).
-				$wa = '';
-				if ( ! empty( $s['whatsapp_number'] ) ) {
-					$num = preg_replace( '/\D/', '', (string) $s['whatsapp_number'] );
-					$wa  = "\n\n" . sprintf( __( 'Você pode falar direto com nosso atendimento pelo WhatsApp: https://wa.me/%s', 'fzwordpress-ai' ), $num );
-				}
-				return self::response( $answer . $wa, null, null, false, $session );
-			}
+			// 2ª falha consecutiva: encaminha para o suporte (abre o formulário).
+			delete_transient( $failKey );
+			$msg     = __( 'Essa informação é dedicada exclusivamente ao nosso suporte. Vou encaminhar a sua solicitação — é só preencher os campos abaixo.', 'fzwordpress-ai' );
+			$handoff = self::whatsapp_handoff( $s, $message ); // WhatsApp continua como opção
+			return self::response( $answer . "\n\n" . $msg, null, $handoff, false, $session, true );
 		}
 
+		// Respondeu bem: zera o contador de falhas da sessão.
+		delete_transient( $failKey );
 		return self::response( $answer, null, null, false, $session );
+	}
+
+	/**
+	 * Monta o handoff de WhatsApp sem abrir protocolo (opção paralela ao suporte
+	 * por e-mail). Retorna null se não houver número configurado.
+	 */
+	private static function whatsapp_handoff( array $s, $question ) {
+		$num = isset( $s['whatsapp_number'] ) ? preg_replace( '/\D/', '', (string) $s['whatsapp_number'] ) : '';
+		if ( '' === $num ) {
+			return null;
+		}
+		$text = sprintf(
+			/* translators: %s: dúvida do visitante */
+			__( 'Olá! Preciso de suporte. Minha dúvida: %s', 'fzwordpress-ai' ),
+			mb_substr( (string) $question, 0, 300 )
+		);
+		return array(
+			'type'    => 'whatsapp',
+			'url'     => 'https://wa.me/' . $num . '?text=' . rawurlencode( $text ),
+			'message' => __( 'Se preferir, você também pode falar com o suporte pelo WhatsApp.', 'fzwordpress-ai' ),
+		);
 	}
 
 	/**
@@ -122,11 +192,10 @@ class FZWAI_Chat {
 		if ( ! $llm['ok'] || '' === trim( $answer ) ) {
 			return true;
 		}
-		// Sinais linguísticos de "não sei / vou encaminhar".
-		// Sem contexto relevante, qualquer resposta é palpite → encaminha.
-		if ( ! $hasContext ) {
-			return true;
-		}
+		// Sinais linguísticos de "não sei / vou encaminhar". O system prompt já
+		// instrui o modelo a se declarar sem resposta quando o contexto não cobre
+		// a pergunta — forçar handoff em TODA mensagem sem contexto abria um
+		// protocolo por turno e tornava o bot inútil com a base ainda pequena.
 		$lc = function_exists( 'mb_strtolower' ) ? mb_strtolower( $answer ) : strtolower( $answer );
 		$signals = array(
 			'não sei', 'nao sei', 'não tenho essa informação', 'nao tenho essa informacao',
@@ -144,14 +213,40 @@ class FZWAI_Chat {
 		return false;
 	}
 
-	private static function response( $reply, $protocol, $handoff, $needContact, $session ) {
+	private static function response( $reply, $protocol, $handoff, $needContact, $session, $supportForm = false ) {
 		return array(
-			'reply'        => $reply,
-			'protocol'     => $protocol,
-			'handoff'      => $handoff,
-			'need_contact' => (bool) $needContact,
-			'session_id'   => $session,
+			'reply'         => $reply,
+			'protocol'      => $protocol,
+			'handoff'       => $handoff,
+			'need_contact'  => (bool) $needContact,
+			'support_form'  => (bool) $supportForm,
+			'session_id'    => $session,
 		);
+	}
+
+	/**
+	 * Últimas mensagens da sessão, em ordem cronológica, no formato do LLM.
+	 * Dá memória de conversa ao bot ("e ele inclui domínio?" após falar do plano).
+	 */
+	private static function recent_history( $session, $limit ) {
+		try {
+			$db   = FZWAI_DB::instance()->pdo();
+			$stmt = $db->prepare( 'SELECT role, content FROM fzwai_messages WHERE session_id = :s ORDER BY id DESC LIMIT :l' );
+			$stmt->bindValue( ':s', $session );
+			$stmt->bindValue( ':l', (int) $limit, PDO::PARAM_INT );
+			$stmt->execute();
+			$rows = $stmt->fetchAll( PDO::FETCH_ASSOC );
+			$out  = array();
+			foreach ( array_reverse( $rows ? $rows : array() ) as $r ) {
+				if ( in_array( $r['role'], array( 'user', 'assistant' ), true ) && '' !== trim( (string) $r['content'] ) ) {
+					$out[] = array( 'role' => $r['role'], 'content' => (string) $r['content'] );
+				}
+			}
+			return $out;
+		} catch ( \Throwable $e ) {
+			// Histórico é best-effort; sem ele a conversa segue, só sem memória.
+			return array();
+		}
 	}
 
 	private static function log_message( $session, $role, $content, $results = array() ) {

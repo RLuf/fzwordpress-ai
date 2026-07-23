@@ -12,7 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class FZWAI_DB {
 
-	const SCHEMA_VERSION = 1;
+	const SCHEMA_VERSION = 2;
 
 	/** @var FZWAI_DB|null */
 	private static $instance = null;
@@ -134,8 +134,75 @@ class FZWAI_DB {
 			created_at TEXT NOT NULL
 		)' );
 		$db->exec( 'CREATE INDEX IF NOT EXISTS idx_msg_session ON fzwai_messages(session_id)' );
+		// Para a cota por sessão (20 msg / 12h): filtra role + janela de tempo.
+		$db->exec( 'CREATE INDEX IF NOT EXISTS idx_msg_session_created ON fzwai_messages(session_id, created_at)' );
+
+		// Base de prospecção: contato do gate (nome completo, celular, e-mail),
+		// uma linha por sessão (upsert). O celular alimenta a prospecção e vai
+		// junto no e-mail de suporte.
+		$db->exec( 'CREATE TABLE IF NOT EXISTS fzwai_contacts (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			session_id TEXT NOT NULL UNIQUE,
+			name TEXT NOT NULL DEFAULT "",
+			phone TEXT NOT NULL DEFAULT "",
+			email TEXT NOT NULL DEFAULT "",
+			page_url TEXT DEFAULT "",
+			ip TEXT DEFAULT "",
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)' );
+		$db->exec( 'CREATE INDEX IF NOT EXISTS idx_contacts_created ON fzwai_contacts(created_at)' );
 
 		$this->set_meta( 'schema_version', (string) self::SCHEMA_VERSION );
+	}
+
+	/**
+	 * Upsert do contato do gate (base de prospecção). Uma linha por sessão.
+	 *
+	 * @param string $session_id
+	 * @param array  $data name, phone, email, page_url, ip
+	 * @return void
+	 */
+	public function save_contact( $session_id, array $data ) {
+		$now  = self::now();
+		$stmt = $this->pdo()->prepare(
+			'INSERT INTO fzwai_contacts (session_id, name, phone, email, page_url, ip, created_at, updated_at)
+			 VALUES (:sid, :name, :phone, :email, :page, :ip, :now, :now)
+			 ON CONFLICT(session_id) DO UPDATE SET
+				name=:name2, phone=:phone2, email=:email2, page_url=:page2, updated_at=:now2'
+		);
+		$stmt->execute( array(
+			':sid'    => (string) $session_id,
+			':name'   => (string) ( $data['name'] ?? '' ),
+			':phone'  => (string) ( $data['phone'] ?? '' ),
+			':email'  => (string) ( $data['email'] ?? '' ),
+			':page'   => (string) ( $data['page_url'] ?? '' ),
+			':ip'     => (string) ( $data['ip'] ?? '' ),
+			':now'    => $now,
+			':name2'  => (string) ( $data['name'] ?? '' ),
+			':phone2' => (string) ( $data['phone'] ?? '' ),
+			':email2' => (string) ( $data['email'] ?? '' ),
+			':page2'  => (string) ( $data['page_url'] ?? '' ),
+			':now2'   => $now,
+		) );
+	}
+
+	/**
+	 * Contagem de mensagens 'user' de uma sessão dentro de uma janela (horas).
+	 * Base da cota anti-abuso (20 msg / 12h).
+	 *
+	 * @param string $session_id
+	 * @param int    $hours
+	 * @return int
+	 */
+	public function count_user_messages( $session_id, $hours = 12 ) {
+		$since = gmdate( 'Y-m-d H:i:s', time() - ( (int) $hours * 3600 ) );
+		$stmt  = $this->pdo()->prepare(
+			'SELECT COUNT(*) FROM fzwai_messages
+			 WHERE session_id = :sid AND role = "user" AND created_at >= :since'
+		);
+		$stmt->execute( array( ':sid' => (string) $session_id, ':since' => $since ) );
+		return (int) $stmt->fetchColumn();
 	}
 
 	// --- Helpers de meta (schema/versão) ---

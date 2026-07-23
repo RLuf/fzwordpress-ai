@@ -1,8 +1,8 @@
 <?php
 /**
  * Interface administrativa do plugin (wp-admin).
- * Registra o menu "FZ AI Atendimento", as três abas (Configurações, Base de
- * conhecimento, Protocolos), o Settings API e os endpoints AJAX usados pelo JS.
+ * Registra o menu "FZ AI Atendimento", as abas (Configurações, Base de
+ * conhecimento), o Settings API e os endpoints AJAX usados pelo JS.
  *
  * Regras de segurança aplicadas em todo o arquivo:
  *   - Saída sempre escapada (esc_html/esc_attr/esc_url/esc_textarea/wp_kses_post).
@@ -46,7 +46,6 @@ class FZWAI_Admin {
 		add_action( 'wp_ajax_fzwai_index_source', array( __CLASS__, 'ajax_index_source' ) );
 		add_action( 'wp_ajax_fzwai_reindex_all', array( __CLASS__, 'ajax_reindex_all' ) );
 		add_action( 'wp_ajax_fzwai_delete_source', array( __CLASS__, 'ajax_delete_source' ) );
-		add_action( 'wp_ajax_fzwai_close_protocol', array( __CLASS__, 'ajax_close_protocol' ) );
 	}
 
 	/* ------------------------------------------------------------------ Menu */
@@ -80,15 +79,6 @@ class FZWAI_Admin {
 			$cap,
 			self::MENU_SLUG . '-knowledge',
 			array( __CLASS__, 'render_knowledge_page' )
-		);
-
-		self::$hooks['protocols'] = add_submenu_page(
-			self::MENU_SLUG,
-			__( 'Protocolos', 'fzwordpress-ai' ),
-			__( 'Protocolos', 'fzwordpress-ai' ),
-			$cap,
-			self::MENU_SLUG . '-protocols',
-			array( __CLASS__, 'render_protocols_page' )
 		);
 	}
 
@@ -126,7 +116,6 @@ class FZWAI_Admin {
 					'working'         => __( 'Processando…', 'fzwordpress-ai' ),
 					'confirm_delete'  => __( 'Remover esta fonte e todos os trechos indexados dela?', 'fzwordpress-ai' ),
 					'confirm_reindex' => __( 'Reindexar todas as fontes agora? Isso pode levar alguns minutos.', 'fzwordpress-ai' ),
-					'confirm_close'   => __( 'Fechar este protocolo?', 'fzwordpress-ai' ),
 					'error'           => __( 'Ocorreu um erro.', 'fzwordpress-ai' ),
 					'network_error'   => __( 'Falha de comunicação com o servidor.', 'fzwordpress-ai' ),
 					'ok'              => __( 'Conexão OK', 'fzwordpress-ai' ),
@@ -283,7 +272,7 @@ class FZWAI_Admin {
 					<div class="fzwai-backend-group<?php echo 'llamacpp' === $s['backend'] ? '' : ' is-hidden'; ?>" data-backend="llamacpp">
 						<table class="form-table" role="presentation">
 							<?php
-							self::text_row( 'llamacpp_bin', __( 'Binário llama.cpp', 'fzwordpress-ai' ), $s['llamacpp_bin'], 'text', '/opt/llama/llama-cli', __( 'Caminho absoluto do executável (llama-cli / llama-server).', 'fzwordpress-ai' ) );
+							self::text_row( 'llamacpp_bin', __( 'Binário llama.cpp', 'fzwordpress-ai' ), $s['llamacpp_bin'], 'text', '/opt/llama/llama-cli', __( 'Caminho absoluto do executável llama-cli (NÃO o llama-server — este adaptador executa o binário por linha de comando; para o llama-server use o backend OpenAI-compatível apontando para http://127.0.0.1:8080/v1).', 'fzwordpress-ai' ) );
 							self::text_row( 'llamacpp_model', __( 'Modelo GGUF', 'fzwordpress-ai' ), $s['llamacpp_model'], 'text', '/opt/llama/model.gguf', __( 'Caminho absoluto do arquivo .gguf.', 'fzwordpress-ai' ) );
 							?>
 						</table>
@@ -526,197 +515,6 @@ class FZWAI_Admin {
 		<?php
 	}
 
-	/* -------------------------------------------------- Página: Protocolos */
-
-	public static function render_protocols_page() {
-		if ( ! current_user_can( 'manage_options' ) ) {
-			return;
-		}
-		$db = self::db();
-
-		// Filtro de status (navegação read-only, sem alteração de estado → não exige nonce).
-		$status  = isset( $_GET['status'] ) ? sanitize_key( wp_unslash( $_GET['status'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		$allowed = array( 'open', 'forwarded', 'closed' );
-		if ( ! in_array( $status, $allowed, true ) ) {
-			$status = '';
-		}
-		$paged = isset( $_GET['paged'] ) ? max( 1, absint( wp_unslash( $_GET['paged'] ) ) ) : 1; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		$per   = 20;
-		$offset = ( $paged - 1 ) * $per;
-
-		$rows  = array();
-		$total = 0;
-		$counts = array( 'all' => 0, 'open' => 0, 'forwarded' => 0, 'closed' => 0 );
-
-		if ( $db ) {
-			// Contadores por status para a navegação superior.
-			$cstmt = $db->prepare( 'SELECT status, COUNT(*) AS c FROM fzwai_protocols GROUP BY status' );
-			$cstmt->execute();
-			foreach ( $cstmt->fetchAll() as $r ) {
-				$counts['all'] += (int) $r['c'];
-				if ( isset( $counts[ $r['status'] ] ) ) {
-					$counts[ $r['status'] ] = (int) $r['c'];
-				}
-			}
-
-			$where  = '';
-			$params = array();
-			if ( '' !== $status ) {
-				$where            = ' WHERE status = :st';
-				$params[':st']    = $status;
-			}
-
-			$tstmt = $db->prepare( 'SELECT COUNT(*) FROM fzwai_protocols' . $where );
-			$tstmt->execute( $params );
-			$total = (int) $tstmt->fetchColumn();
-
-			$lstmt = $db->prepare( 'SELECT id, protocol_no, visitor_name, visitor_contact, question, status, handoff, page_url, created_at FROM fzwai_protocols' . $where . ' ORDER BY id DESC LIMIT :lim OFFSET :off' );
-			foreach ( $params as $k => $v ) {
-				$lstmt->bindValue( $k, $v );
-			}
-			$lstmt->bindValue( ':lim', $per, PDO::PARAM_INT );
-			$lstmt->bindValue( ':off', $offset, PDO::PARAM_INT );
-			$lstmt->execute();
-			$rows = $lstmt->fetchAll();
-		}
-
-		$wa_number = preg_replace( '/\D+/', '', (string) FZWAI_Settings::get( 'whatsapp_number' ) );
-		?>
-		<div class="wrap fzwai-wrap">
-			<h1 class="fzwai-title">
-				<span class="dashicons dashicons-format-chat"></span>
-				<?php esc_html_e( 'FZ AI Atendimento', 'fzwordpress-ai' ); ?>
-			</h1>
-			<?php self::render_tabs( self::MENU_SLUG . '-protocols' ); ?>
-
-			<?php if ( ! $db ) : ?>
-				<div class="notice notice-error"><p><?php esc_html_e( 'PDO SQLite indisponível neste servidor. Os protocolos não podem ser exibidos.', 'fzwordpress-ai' ); ?></p></div>
-			<?php else : ?>
-
-				<ul class="subsubsub fzwai-filters">
-					<?php
-					$filters = array(
-						''          => __( 'Todos', 'fzwordpress-ai' ),
-						'open'      => __( 'Abertos', 'fzwordpress-ai' ),
-						'forwarded' => __( 'Encaminhados', 'fzwordpress-ai' ),
-						'closed'    => __( 'Fechados', 'fzwordpress-ai' ),
-					);
-					$i    = 0;
-					$last = count( $filters ) - 1;
-					foreach ( $filters as $key => $label ) {
-						$url = add_query_arg(
-							array(
-								'page'   => self::MENU_SLUG . '-protocols',
-								'status' => $key,
-							),
-							admin_url( 'admin.php' )
-						);
-						$ckey    = '' === $key ? 'all' : $key;
-						$current = ( $status === $key ) ? ' class="current"' : '';
-						echo '<li>';
-						printf(
-							'<a href="%s"%s>%s <span class="count">(%s)</span></a>',
-							esc_url( $url ),
-							$current, // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- literal controlado.
-							esc_html( $label ),
-							esc_html( number_format_i18n( isset( $counts[ $ckey ] ) ? $counts[ $ckey ] : 0 ) )
-						);
-						echo ( $i < $last ) ? ' | </li>' : '</li>';
-						$i++;
-					}
-					?>
-				</ul>
-
-				<table class="wp-list-table widefat fixed striped fzwai-protocols">
-					<thead>
-						<tr>
-							<th><?php esc_html_e( 'Protocolo', 'fzwordpress-ai' ); ?></th>
-							<th><?php esc_html_e( 'Data', 'fzwordpress-ai' ); ?></th>
-							<th><?php esc_html_e( 'Visitante', 'fzwordpress-ai' ); ?></th>
-							<th><?php esc_html_e( 'Pergunta', 'fzwordpress-ai' ); ?></th>
-							<th><?php esc_html_e( 'Status', 'fzwordpress-ai' ); ?></th>
-							<th><?php esc_html_e( 'Ações', 'fzwordpress-ai' ); ?></th>
-						</tr>
-					</thead>
-					<tbody>
-					<?php if ( empty( $rows ) ) : ?>
-						<tr><td colspan="6"><?php esc_html_e( 'Nenhum protocolo encontrado.', 'fzwordpress-ai' ); ?></td></tr>
-					<?php else : ?>
-						<?php foreach ( $rows as $p ) : ?>
-							<tr data-protocol-id="<?php echo esc_attr( (int) $p['id'] ); ?>">
-								<td><strong><?php echo esc_html( $p['protocol_no'] ); ?></strong></td>
-								<td><?php echo esc_html( self::local_date( $p['created_at'] ) ); ?></td>
-								<td>
-									<?php echo esc_html( '' !== $p['visitor_name'] ? $p['visitor_name'] : __( '—', 'fzwordpress-ai' ) ); ?>
-									<?php if ( '' !== $p['visitor_contact'] ) : ?>
-										<div class="fzwai-muted"><?php echo esc_html( $p['visitor_contact'] ); ?></div>
-									<?php endif; ?>
-								</td>
-								<td><span title="<?php echo esc_attr( $p['question'] ); ?>"><?php echo esc_html( wp_trim_words( $p['question'], 14, '…' ) ); ?></span></td>
-								<td class="fzwai-status-cell"><?php echo self::protocol_pill( $p['status'] ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- markup escapado no método. ?></td>
-								<td class="fzwai-row-actions">
-									<?php if ( '' !== $wa_number ) : ?>
-										<?php
-										$wa_text = sprintf(
-											/* translators: %s: protocol number */
-											__( 'Protocolo %s', 'fzwordpress-ai' ),
-											$p['protocol_no']
-										);
-										$wa_url = 'https://wa.me/' . $wa_number . '?text=' . rawurlencode( $wa_text );
-										?>
-										<a class="button button-small" href="<?php echo esc_url( $wa_url ); ?>" target="_blank" rel="noopener noreferrer">
-											<span class="dashicons dashicons-whatsapp"></span>
-											<?php esc_html_e( 'WhatsApp', 'fzwordpress-ai' ); ?>
-										</a>
-									<?php endif; ?>
-									<?php if ( 'closed' !== $p['status'] ) : ?>
-										<button type="button" class="button button-small" data-fzwai-action="close"><?php esc_html_e( 'Fechar', 'fzwordpress-ai' ); ?></button>
-									<?php endif; ?>
-								</td>
-							</tr>
-						<?php endforeach; ?>
-					<?php endif; ?>
-					</tbody>
-				</table>
-
-				<?php
-				$pages = (int) ceil( $total / $per );
-				if ( $pages > 1 ) :
-					?>
-					<div class="tablenav">
-						<div class="tablenav-pages">
-							<span class="displaying-num"><?php echo esc_html( sprintf( _n( '%s item', '%s itens', $total, 'fzwordpress-ai' ), number_format_i18n( $total ) ) ); ?></span>
-							<?php
-							$base = add_query_arg(
-								array(
-									'page'   => self::MENU_SLUG . '-protocols',
-									'status' => $status,
-									'paged'  => '%#%',
-								),
-								admin_url( 'admin.php' )
-							);
-							echo wp_kses_post(
-								paginate_links(
-									array(
-										'base'      => $base,
-										'format'    => '',
-										'current'   => $paged,
-										'total'     => $pages,
-										'prev_text' => '‹',
-										'next_text' => '›',
-									)
-								)
-							);
-							?>
-						</div>
-					</div>
-				<?php endif; ?>
-
-			<?php endif; ?>
-		</div>
-		<?php
-	}
-
 	/* --------------------------------------------------------------- AJAX */
 
 	public static function ajax_test_backend() {
@@ -850,39 +648,6 @@ class FZWAI_Admin {
 		wp_send_json_success( array( 'message' => __( 'Fonte removida.', 'fzwordpress-ai' ) ) );
 	}
 
-	public static function ajax_close_protocol() {
-		self::verify_ajax();
-		$db = self::db();
-		if ( ! $db ) {
-			wp_send_json_error( array( 'message' => __( 'Banco de dados indisponível.', 'fzwordpress-ai' ) ) );
-		}
-		$id = isset( $_POST['protocol_id'] ) ? absint( wp_unslash( $_POST['protocol_id'] ) ) : 0;
-		if ( ! $id ) {
-			wp_send_json_error( array( 'message' => __( 'Protocolo inválido.', 'fzwordpress-ai' ) ) );
-		}
-
-		try {
-			$stmt = $db->prepare( 'UPDATE fzwai_protocols SET status = :st, updated_at = :now WHERE id = :id' );
-			$stmt->execute(
-				array(
-					':st'  => 'closed',
-					':now' => FZWAI_DB::now(),
-					':id'  => $id,
-				)
-			);
-		} catch ( Exception $e ) {
-			wp_send_json_error( array( 'message' => __( 'Não foi possível fechar o protocolo.', 'fzwordpress-ai' ) ) );
-		}
-
-		wp_send_json_success(
-			array(
-				'status'  => 'closed',
-				'label'   => __( 'fechado', 'fzwordpress-ai' ),
-				'message' => __( 'Protocolo fechado.', 'fzwordpress-ai' ),
-			)
-		);
-	}
-
 	/* ------------------------------------------------------------- Helpers */
 
 	/**
@@ -1006,7 +771,6 @@ class FZWAI_Admin {
 		$tabs = array(
 			self::MENU_SLUG               => __( 'Configurações', 'fzwordpress-ai' ),
 			self::MENU_SLUG . '-knowledge' => __( 'Base de conhecimento', 'fzwordpress-ai' ),
-			self::MENU_SLUG . '-protocols' => __( 'Protocolos', 'fzwordpress-ai' ),
 		);
 		echo '<nav class="nav-tab-wrapper fzwai-tabs">';
 		foreach ( $tabs as $slug => $label ) {
@@ -1031,20 +795,6 @@ class FZWAI_Admin {
 			'pending' => __( 'pendente', 'fzwordpress-ai' ),
 			'indexed' => __( 'indexado', 'fzwordpress-ai' ),
 			'error'   => __( 'erro', 'fzwordpress-ai' ),
-		);
-		$label = isset( $labels[ $status ] ) ? $labels[ $status ] : $status;
-		return '<span class="fzwai-pill fzwai-pill-' . esc_attr( $status ) . '">' . esc_html( $label ) . '</span>';
-	}
-
-	/**
-	 * Pílula de status de protocolo (open/forwarded/closed). Retorna markup escapado.
-	 */
-	private static function protocol_pill( $status ) {
-		$status = $status ? $status : 'open';
-		$labels = array(
-			'open'      => __( 'aberto', 'fzwordpress-ai' ),
-			'forwarded' => __( 'encaminhado', 'fzwordpress-ai' ),
-			'closed'    => __( 'fechado', 'fzwordpress-ai' ),
 		);
 		$label = isset( $labels[ $status ] ) ? $labels[ $status ] : $status;
 		return '<span class="fzwai-pill fzwai-pill-' . esc_attr( $status ) . '">' . esc_html( $label ) . '</span>';
