@@ -4,6 +4,17 @@ Plugin WordPress de **pré-atendimento com IA**: entende a dúvida do visitante,
 
 Comercializável sob **GPL-2.0-or-later** (venda suporte, hospedagem e serviços em cima).
 
+> **Estado:** desenvolvimento/homologação. Não faz parte do caminho crítico de
+> provisionamento do ImovelSite.
+
+## Navegação
+
+- [Documentação](docs/README.md)
+- [Operação e diagnóstico](docs/OPERATIONS.md)
+- [Compliance](docs/COMPLIANCE.md)
+- [Build do llama.cpp](bin/README.md)
+- [Regras para agentes](AGENTS.md)
+
 ## Arquitetura
 
 ```
@@ -50,11 +61,14 @@ O build por tag: `git tag v1.0 && git push origin v1.0` aciona `.github/workflow
 | Atendimento | `whatsapp_number`, `handoff_message`, `ask_contact`, `protocol_prefix` |
 | Widget | `widget_enabled`, `widget_title`, `widget_greeting`, `widget_color`, `widget_position` |
 
-## Privacidade & segurança
+## Privacidade e segurança
 
 - Nenhum dado do visitante vai a terceiros além do motor de IA que **você** configurar. Com Ollama/llama.cpp, 100% no seu ambiente.
 - Diretório de dados bloqueado ao acesso web; SQLite fora do alcance público.
-- Endpoints REST com nonce e rate-limit por IP; entradas sanitizadas, saídas escapadas; consultas com prepared statements.
+- Endpoint público com rate limit; operações administrativas exigem capacidade
+  e nonce; entradas são validadas e consultas usam prepared statements.
+- Existe uma pendência documentada sobre `X-WP-Nonce` no widget público antes
+  da declaração de produção; veja [AGENTS.md](AGENTS.md).
 
 ## Comercialização
 
